@@ -294,28 +294,33 @@ def recombination2pt(model1,model2): #2 point recombination
     
     return [child1,child2]
 recombination2pt.__doc__ = "recombination2pt(model1,model2) does 2 point crossover and returns two children models"
+
+def get_numeric_indices(l): #Returns indices of list that are numeric
+    return [i for i in range(len(l)) if type(l[i]) in [int,float]]
+
+
 def mutate(model,variables,ops=defaultOps(),const=defaultConst(),maxLength=10):
     newModel=copy.deepcopy(model)
     newModel[0]=np.array(newModel[0],dtype=object).tolist()
-    mutationType=random.randint(0,6)
+    mutationType=random.randint(0,7) 
     varChoices=[variableSelect(i) for i in range(variables)]+const
     opChoice=0
     varChoice=0
     
     tmp=0
     
-    if mutationType==0:
+    if mutationType==0: #single operator mutation
         opChoice=random.randint(0,len(newModel[0])-1)
         if len(newModel[0])>0:
             newModel[0][opChoice]=np.random.choice([i for i in ops] )
                
-    elif mutationType==1:
+    elif mutationType==1: #single variable mutation
         varChoice=np.random.choice(varChoices)
         if callable(varChoice) and varChoice.__name__!='<lambda>':
             varChoice=varChoice()
         newModel[1][random.randint(0,len(newModel[1])-1)]=varChoice
     
-    elif mutationType==2:
+    elif mutationType==2: #insertion mutation to top of stack
         opChoice=np.random.choice(ops)
         newModel[0]=[opChoice]+newModel[0]
         while modelArity(newModel)>len(newModel[1]):
@@ -324,17 +329,17 @@ def mutate(model,variables,ops=defaultOps(),const=defaultConst(),maxLength=10):
                 varChoice=varChoice()
             newModel[1]=[varChoice]+newModel[1]
         
-    elif mutationType==3:
+    elif mutationType==3: #deletion mutation from top of stack
         if len(newModel[0])>1:
             opChoice=random.randint(1,len(newModel[0])-1)
             newModel[0]=newModel[0][-opChoice:]
             newModel[1]=newModel[1][-listArity(newModel[0]):]
             
-    elif mutationType==4:
+    elif mutationType==4: #insertion mutation to bottom of stack
         opChoice=np.random.choice([i for i in ops])
         newModel[0].append(opChoice)
         
-    elif mutationType==5:
+    elif mutationType==5: #mutation via crossover with random model
         newModel=recombination2pt(newModel,generateRandomModel(variables,ops,const,maxLength))[0]
             
     elif mutationType==6: #single operator insertion mutation
@@ -342,6 +347,12 @@ def mutate(model,variables,ops=defaultOps(),const=defaultConst(),maxLength=10):
         singleOps.append('pop')
         pos=random.randint(0,len(newModel[0])-1)
         newModel[0].insert(pos,np.random.choice(singleOps))
+
+    elif mutationType==7: #nudge numeric constant
+        pos=get_numeric_indices(newModel[1])
+        if(len(pos)>0): #If there are numeric constants
+            pos=random.choice(pos)
+            newModel[1][pos]=newModel[1][pos]+np.random.normal(-1,1) 
     
     if modelArity(newModel)<len(newModel[1]):
         newModel[1]=newModel[1][:modelArity(newModel)]
