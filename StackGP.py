@@ -353,7 +353,7 @@ def mutate(model,variables,ops=defaultOps(),const=defaultConst(),maxLength=10):
         if(len(pos)>0): #If there are numeric constants
             pos=random.choice(pos)
             newModel[1][pos]=newModel[1][pos]+np.random.normal(-1,1) 
-    
+            
     if modelArity(newModel)<len(newModel[1]):
         newModel[1]=newModel[1][:modelArity(newModel)]
     elif modelArity(newModel)>len(newModel[1]):
@@ -540,6 +540,7 @@ def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=def
         plt.title("Fitness over Time")
         plt.xlabel("Generations")
         plt.ylabel("Fitness")
+        plt.show()
     
     return models
     
