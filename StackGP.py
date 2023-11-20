@@ -805,3 +805,35 @@ def plotPredictionResponseCorrelation(model,inputData,response):
     plt.ylabel("Predicted Response")
     plt.legend()
     plt.show()
+def plotModelComplexityDistribution(models):
+    tMods=copy.deepcopy(models)
+    [modelToListForm(mod) for mod in tMods]
+    paretoModels=paretoTournament(tMods)
+    for i in paretoModels:
+        tMods.remove(i)
+    [modelRestoreForm(mod) for mod in paretoModels]
+    [modelRestoreForm(mod) for mod in tMods]
+    pComplexities=[mod[2][1] for mod in paretoModels]
+    tComplexities=[mod[2][1] for mod in tMods]
+    plt.hist(tComplexities,label="Non-Pareto Models")
+    plt.hist(pComplexities,label="Pareto Models")
+    plt.xlabel("Model Complexity")
+    plt.ylabel("Frequency")
+    plt.legend()
+    plt.show()
+def plotModelAccuracyDistribution(models):
+    tMods=copy.deepcopy(models)
+    [modelToListForm(mod) for mod in tMods]
+    paretoModels=paretoTournament(tMods)
+    for i in paretoModels:
+        tMods.remove(i)
+    [modelRestoreForm(mod) for mod in paretoModels]
+    [modelRestoreForm(mod) for mod in tMods]
+    pAccuracies=[mod[2][0] for mod in paretoModels]
+    tAccuracies=[mod[2][0] for mod in tMods]
+    plt.hist(tAccuracies,label="Non-Pareto Models")
+    plt.hist(pAccuracies,label="Pareto Models")
+    plt.xlabel("Model Accuracy")
+    plt.ylabel("Frequency")
+    plt.legend()
+    plt.show()
