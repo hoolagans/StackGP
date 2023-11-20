@@ -805,6 +805,7 @@ def plotPredictionResponseCorrelation(model,inputData,response):
     plt.ylabel("Predicted Response")
     plt.legend()
     plt.show()
+#Plot model complexity distribution
 def plotModelComplexityDistribution(models):
     tMods=copy.deepcopy(models)
     [modelToListForm(mod) for mod in tMods]
@@ -821,6 +822,7 @@ def plotModelComplexityDistribution(models):
     plt.ylabel("Frequency")
     plt.legend()
     plt.show()
+#Plot model accuracy distribution
 def plotModelAccuracyDistribution(models):
     tMods=copy.deepcopy(models)
     [modelToListForm(mod) for mod in tMods]
@@ -837,3 +839,37 @@ def plotModelAccuracyDistribution(models):
     plt.ylabel("Frequency")
     plt.legend()
     plt.show()
+#Plot model residuals relative to response
+def plotModelResiduals(model,input,response):
+    plt.scatter(response,evaluateGPModel(model,input)-response)
+    plt.xlabel("Response")
+    plt.ylabel("Residual")
+    plt.show()
+#Plot model residual distribution
+def plotModelResidualDistribution(model,input,response):
+    plt.hist(evaluateGPModel(model,input)-response)
+    plt.xlabel("Residual")
+    plt.ylabel("Frequency")
+    plt.show()
+#Plot the presence of variables in a model population
+def plotVariablePresence(models,variables=["x"+str(i) for i in range(100)],sort=False):
+    vars=[varReplace(model[1],variables) for model in models]
+    #Remove all numeric entries in vars
+    vars=[[i for i in var if type(i)!=int and type(i)!=float] for var in vars]
+    #Merge into one list
+    vars=[j for i in vars for j in i]
+    #Count frequency of each variable in vars
+    varFreqs=[vars.count(i) for i in variables]
+    #Keep only variables that appear at least once
+    variablesUsed=[variables[i] for i in range(len(varFreqs)) if varFreqs[i]>0]
+    varFreqs=[varFreqs[i] for i in range(len(varFreqs)) if varFreqs[i]>0]
+    if sort:
+        order=np.argsort(varFreqs)[::-1]
+        variablesUsed=[variablesUsed[i] for i in order]
+        varFreqs=[varFreqs[i] for i in order]
+    #Plot variable frequency
+    plt.bar(variablesUsed,varFreqs)
+    plt.xlabel("Variable")
+    plt.ylabel("Frequency")
+    plt.show()
+
