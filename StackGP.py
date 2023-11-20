@@ -872,4 +872,48 @@ def plotVariablePresence(models,variables=["x"+str(i) for i in range(100)],sort=
     plt.xlabel("Variable")
     plt.ylabel("Frequency")
     plt.show()
-
+def replaceOpsWithStrings(opStack):
+    model = copy.deepcopy(opStack)
+    model = replaceFunc(model,exp,str("exp"))
+    model = replaceFunc(model,tan,str("tan"))
+    model = replaceFunc(model,sqrt,str("sqrt"))
+    model = replaceFunc(model,inv,str("1/#"))
+    model = replaceFunc(model,sin,str("sin"))
+    model = replaceFunc(model,cos,str("cos"))
+    model = replaceFunc(model,arccos,str("acos"))
+    model = replaceFunc(model,arcsin,str("asin"))
+    model = replaceFunc(model,arctan,str("atan"))
+    model = replaceFunc(model,tanh,str("tanh"))
+    model = replaceFunc(model,log,str("log"))
+    model = replaceFunc(model,add,"+")
+    model = replaceFunc(model,mult,"*")
+    model = replaceFunc(model,sub,"-")
+    model = replaceFunc(model,protectDiv,"/")
+    model = replaceFunc(model,sqrd,"^2")
+    return model
+#Plot the presence of operators in a model population
+def plotOperatorPresence(models,sort=False,excludePop=True):
+    ops=[replaceOpsWithStrings(model[0]) for model in models]
+    #Merge into one list
+    ops=[j for i in ops for j in i]
+    #Remove duplicates in ops
+    uniqueOps=list(set(ops))
+    if excludePop:
+        #Remove pop operator
+        uniqueOps.remove('pop')
+    #Count frequency of each operator in ops
+    opFreqs=[ops.count(i) for i in uniqueOps]
+    #Keep only operators that appear at least once
+    opsUsed=[str(uniqueOps[i]) for i in range(len(opFreqs)) if opFreqs[i]>0]
+    opFreqs=[opFreqs[i] for i in range(len(opFreqs)) if opFreqs[i]>0]
+    if sort:
+        order=np.argsort(opFreqs)[::-1]
+        opsUsed=[opsUsed[i] for i in order]
+        opFreqs=[opFreqs[i] for i in order]
+    #Plot operator frequency
+    plt.bar(opsUsed,opFreqs)
+    #Rotate x axis labels
+    plt.xticks(rotation=90)
+    plt.xlabel("Operator")
+    plt.ylabel("Frequency")
+    plt.show()
