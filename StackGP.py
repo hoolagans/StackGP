@@ -913,7 +913,7 @@ def plotOperatorPresence(models,sort=False,excludePop=True):
     #Plot operator frequency
     plt.bar(opsUsed,opFreqs)
     #Rotate x axis labels
-    plt.xticks(rotation=90)
+    plt.xticks(rotation=0)
     plt.xlabel("Operator")
     plt.ylabel("Frequency")
     plt.show()
