@@ -486,7 +486,7 @@ def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=def
             break
         for mods in models:
             setModelQuality(mods,inData,resData)
-        
+        models=removeIndeterminateModels(models)
         if tracking:
             bestFits.append(min([mods[2][0] for mods in paretoTournament(models)])) 
        
