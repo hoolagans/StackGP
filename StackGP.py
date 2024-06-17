@@ -399,6 +399,24 @@ def deleteDuplicateModels(models): #Removes any models that are the same, does n
     
     return uniqueMods
 deleteDuplicateModels.__doc__ = "deleteDuplicateModels(models) deletes models that have the same form without simplifying"
+
+def deleteDuplicateModelsPhenotype(models): #Removes any models that are the same regarding phenotype, does not consider simplified form
+    uniqueMods = [printGPModel(models[0])]
+    remainingMods=[printGPModel(mod) for mod in models[1:]]
+    uniquePos = [0]
+    currPos=1
+    for mod in remainingMods:
+        test=False
+        for checkMod in uniqueMods:
+            if mod==checkMod:
+                test=True
+        if not test:
+            uniqueMods.append(mod)
+            uniquePos.append(currPos)
+        currPos+=1
+    
+    return [models[i] for i in uniquePos]
+
 def removeIndeterminateModels(models): #Removes models from the population that evaluate to nonreal values
     return [i for i in models if (not any(np.isnan(i[2]))) and all(np.isfinite(np.isnan(i[2])))]
 removeIndeterminateModels.__doc__ = "removeIndeterminateModels(models) removes models that have a fitness that results from inf or nan values"
@@ -471,7 +489,7 @@ def alignGPModel(model, data, response): #Aligns a model
     setModelQuality(newModel,data,response)
     return newModel
 alignGPModel.__doc__ = "alignGPModel(model, input, response) aligns a model such that response-a*f(x)+b are minimized over a and b"
-def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=defaultConst(), variableNames=[], mutationRate=79, crossoverRate=11, spawnRate=10, extinction=False,extinctionRate=10,elitismRate=50,popSize=300,maxComplexity=100,align=True,initialPop=[],timeLimit=300,capTime=False,tourneySize=5,tracking=False):
+def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=defaultConst(), variableNames=[], mutationRate=79, crossoverRate=11, spawnRate=10, extinction=False,extinctionRate=10,elitismRate=50,popSize=300,maxComplexity=100,align=True,initialPop=[],timeLimit=300,capTime=False,tourneySize=5,tracking=False,modelEvaluationMetrics=[fitness,stackGPModelComplexity]):
     
     fullInput,fullResponse=copy.deepcopy(inputData),copy.deepcopy(responseData)
     inData=copy.deepcopy(fullInput)
@@ -485,17 +503,17 @@ def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=def
         if capTime and time.perf_counter()-startTime>timeLimit:
             break
         for mods in models:
-            setModelQuality(mods,inData,resData)
+            setModelQuality(mods,inData,resData,modelEvaluationMetrics=modelEvaluationMetrics)
         models=removeIndeterminateModels(models)
         if tracking:
-            bestFits.append(min([mods[2][0] for mods in paretoTournament(models)])) 
-       
+            bestFits.append(min([mods[2][0] for mods in paretoTournament(models)]))
+
         #paretoModels=paretoTournament(models)
-        paretoModels=selectModels(models,elitismRate/100*popSize)
+        paretoModels=selectModels(models,elitismRate/100*popSize if elitismRate/100*popSize<len(models) else len(models))
         if extinction and i%extinctionRate:
             models=initializeGPModels(variableCount,ops,const,popSize)
             for mods in models:
-                setModelQuality(mods,inData,resData)
+                setModelQuality(mods,inData,resData,modelEvaluationMetrics=modelEvaluationMetrics)
         
         models=tournamentModelSelection(models,popSize,tourneySize)
         
@@ -513,10 +531,11 @@ def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=def
         childModels=childModels+initializeGPModels(variableCount,ops,const,round(spawnRate/100*popSize))
         
         childModels=deleteDuplicateModels(childModels)
+        childModels=[model for model in childModels if stackGPModelComplexity(model)<maxComplexity]
         
-        for mods in childModels:
-            setModelQuality(mods,inData,resData)
-        childModels=removeIndeterminateModels(childModels)
+        #for mods in childModels:
+        #    setModelQuality(mods,inData,resData,modelEvaluationMetrics=modelEvaluationMetrics)
+        #childModels=removeIndeterminateModels(childModels)
         
         if len(childModels)<popSize:
             childModels=childModels+initializeGPModels(variableCount,ops,const,popSize-len(childModels))
@@ -525,7 +544,7 @@ def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=def
         
     
     for mods in models:
-        setModelQuality(mods,fullInput,fullResponse)
+        setModelQuality(mods,fullInput,fullResponse,modelEvaluationMetrics=modelEvaluationMetrics)
     models=[trimModel(mod) for mod in models]
     models=deleteDuplicateModels(models)
     models=removeIndeterminateModels(models)
@@ -547,7 +566,7 @@ def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=def
 
 def replaceFunc(stack,f1,f2):
     return [i if i!=f1 else f2 for i in stack]
-def printGPModel(mod,inputData=symbols(["x"+str(i) for i in range(100)])): #Evaluates a model numerically
+def printGPModel(mod,inputData=symbols(["x"+str(i) for i in range(100)])): #Evaluates a model algebraically
     def inv1(a):
         return a**(-1)
     from sympy import tan as tan1, exp as exp1, sqrt as sqrt1, sin as sin1, cos as cos1, acos, asin, atan, tanh as tanh1, log as log1
@@ -917,3 +936,34 @@ def plotOperatorPresence(models,sort=False,excludePop=True):
     plt.xlabel("Operator")
     plt.ylabel("Frequency")
     plt.show()
+
+############################
+#Sharpness Computations
+############################
+
+def sharpnessConstants(model,inputData,responseData,numPerturbations=10,percentPerturbation=0.2):
+
+    fits=[]
+
+    #For each model parameter, if numeric, randomly perturb by x% and see how much the model changes
+    for i in range(numPerturbations):
+        tempModel=copy.deepcopy(model)
+        newParameters=[param if callable(param) else param*(1+percentPerturbation*(np.random.uniform()-0.5)) for param in model[1]]
+        tempModel[1]=newParameters
+        fits.append(fitness(tempModel,inputData,responseData))
+    return np.std(fits)
+
+def sharpnessData(model,inputData,responseData,numPerturbations=10,percentPerturbation=0.2):
+
+    fits=[]
+
+    #For each vector, randomly perturb by x% of the standard deviation and see how much the model fitness changes
+    for i in range(numPerturbations):
+        tempData=copy.deepcopy(inputData)
+        tempData=np.array([(vec+percentPerturbation*np.std(vec)*(np.random.uniform(size=len(vec))-0.5)) for vec in tempData])
+        fits.append(fitness(model,tempData,responseData))
+    return np.std(fits)
+
+def totalSharpness(model,inputData,responseData,numPerturbations=10,percentPerturbation=0.2):
+
+    return sharpnessConstants(model,inputData,responseData,numPerturbations=numPerturbations,percentPerturbation=percentPerturbation)+sharpnessData(model,inputData,responseData,numPerturbations=numPerturbations,percentPerturbation=percentPerturbation)
