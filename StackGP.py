@@ -953,7 +953,7 @@ def sharpnessConstants(model,inputData,responseData,numPerturbations=10,percentP
         fits.append(fitness(tempModel,inputData,responseData))
     return np.std(fits)
 
-def sharpnessData(model,inputData,responseData,numPerturbations=10,percentPerturbation=0.2):
+def sharpnessData(model,inputData,responseData,numPerturbations=10,percentPerturbation=0.2,preserveSign=False):
 
     fits=[]
 
@@ -961,6 +961,9 @@ def sharpnessData(model,inputData,responseData,numPerturbations=10,percentPertur
     for i in range(numPerturbations):
         tempData=copy.deepcopy(inputData)
         tempData=np.array([(vec+percentPerturbation*np.std(vec)*(np.random.uniform(size=len(vec))-0.5)) for vec in tempData])
+        if preserveSign:
+            signs=[np.unique(var) for var in np.sign(inputData)]
+            tempData=[signs[i]*abs(tempData[i]) if len(signs[i])==1 else tempData[i] for i in range(len(signs))]
         fits.append(fitness(model,tempData,responseData))
     return np.std(fits)
 
