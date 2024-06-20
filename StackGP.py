@@ -967,6 +967,6 @@ def sharpnessData(model,inputData,responseData,numPerturbations=10,percentPertur
         fits.append(fitness(model,tempData,responseData))
     return np.std(fits)
 
-def totalSharpness(model,inputData,responseData,numPerturbations=10,percentPerturbation=0.2):
+def totalSharpness(model,inputData,responseData,numPerturbations=10,percentPerturbation=0.2,preserveSign=False):
 
-    return sharpnessConstants(model,inputData,responseData,numPerturbations=numPerturbations,percentPerturbation=percentPerturbation)+sharpnessData(model,inputData,responseData,numPerturbations=numPerturbations,percentPerturbation=percentPerturbation)
+    return sharpnessConstants(model,inputData,responseData,numPerturbations=numPerturbations,percentPerturbation=percentPerturbation)+sharpnessData(model,inputData,responseData,numPerturbations=numPerturbations,percentPerturbation=percentPerturbation,preserveSign=preserveSign)
