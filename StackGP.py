@@ -79,6 +79,20 @@ def defaultConst():
 def ranReal(a=20,b=-10):
     return random.random()*a-b
 
+
+############################
+#Data Subsampling Methods
+############################
+def randomSubsample(x,y):
+    n=max(int(np.ceil(len(y)**(3/5))),3)
+    idx=np.random.choice(range(x.shape[1]),n,replace=False)
+    return np.array([i[idx] for i in x]),y[idx]
+
+def generationProportionalSample(x,y,generation=100,generations=100):
+    n=max(int(np.ceil(len(y)*(generation/generations)**(3/5))),3)
+    idx=np.random.choice(range(x.shape[1]),n,replace=False)
+    return np.array([i[idx] for i in x]),y[idx]
+
 import inspect
 def getArity(func): #Returns the arity of a function: used for model evaluations
     if func=="pop":
@@ -489,7 +503,7 @@ def alignGPModel(model, data, response): #Aligns a model
     setModelQuality(newModel,data,response)
     return newModel
 alignGPModel.__doc__ = "alignGPModel(model, input, response) aligns a model such that response-a*f(x)+b are minimized over a and b"
-def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=defaultConst(), variableNames=[], mutationRate=79, crossoverRate=11, spawnRate=10, extinction=False,extinctionRate=10,elitismRate=50,popSize=300,maxComplexity=100,align=True,initialPop=[],timeLimit=300,capTime=False,tourneySize=5,tracking=False,modelEvaluationMetrics=[fitness,stackGPModelComplexity]):
+def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=defaultConst(), variableNames=[], mutationRate=79, crossoverRate=11, spawnRate=10, extinction=False,extinctionRate=10,elitismRate=50,popSize=300,maxComplexity=100,align=True,initialPop=[],timeLimit=300,capTime=False,tourneySize=5,tracking=False,modelEvaluationMetrics=[fitness,stackGPModelComplexity],dataSubsample=False,samplingMethod=randomSubsample):
     
     fullInput,fullResponse=copy.deepcopy(inputData),copy.deepcopy(responseData)
     inData=copy.deepcopy(fullInput)
@@ -502,6 +516,8 @@ def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=def
     for i in range(generations):
         if capTime and time.perf_counter()-startTime>timeLimit:
             break
+        if dataSubsample:
+            inData,resData=samplingMethod(fullInput,fullResponse)
         for mods in models:
             setModelQuality(mods,inData,resData,modelEvaluationMetrics=modelEvaluationMetrics)
         models=removeIndeterminateModels(models)
