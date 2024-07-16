@@ -986,3 +986,13 @@ def sharpnessData(model,inputData,responseData,numPerturbations=10,percentPertur
 def totalSharpness(model,inputData,responseData,numPerturbations=10,percentPerturbation=0.2,preserveSign=False):
 
     return sharpnessConstants(model,inputData,responseData,numPerturbations=numPerturbations,percentPerturbation=percentPerturbation)+sharpnessData(model,inputData,responseData,numPerturbations=numPerturbations,percentPerturbation=percentPerturbation,preserveSign=preserveSign)
+
+############################
+#Multiple Independent Searches
+############################
+def runEpochs(x,y,epochs=5,**kwargs):
+    models=[]
+    for i in range(epochs):
+        models+=evolve(x,y,**kwargs)
+
+    return sortModels(models)
