@@ -1,0 +1,22 @@
+package:
+  name: stackgp
+  version: 0.1
+
+source:
+  path: .
+
+build:
+  number: 0
+  script: "{{ PYTHON }} -m pip install ."
+
+requirements:
+  build:
+    - python
+    - pip
+  run:
+    - python
+
+about:
+  home: https://github.com/yourusername/your_library  # if applicable
+  license: MIT  # Specify your license here
+  summary: A description of your library
