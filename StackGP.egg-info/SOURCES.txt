@@ -1,0 +1,12 @@
+setup.py
+StackGP/StackGP.py
+StackGP/__init__.py
+StackGP.egg-info/PKG-INFO
+StackGP.egg-info/SOURCES.txt
+StackGP.egg-info/dependency_links.txt
+StackGP.egg-info/top_level.txt
+stackgp.egg-info/PKG-INFO
+stackgp.egg-info/SOURCES.txt
+stackgp.egg-info/dependency_links.txt
+stackgp.egg-info/requires.txt
+stackgp.egg-info/top_level.txt
