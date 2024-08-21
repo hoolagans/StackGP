@@ -18,7 +18,12 @@ import dill
 import os
 from sklearn.cluster import KMeans #for clustering in ensemble definition
 from scipy.optimize import minimize #for uncertainty maximization
-from sympy import symbols
+from sympy import symbols, simplify, expand
+import sympy as sym
+
+import signal #for timing out functions
+from contextlib import contextmanager #for timing out functions
+
 warnings.filterwarnings('ignore', '.*invalid value.*' )
 warnings.filterwarnings('ignore', '.*overflow.*' )
 warnings.filterwarnings('ignore', '.*divide by.*' )
@@ -220,8 +225,55 @@ fitness.__doc__ = "fitness(program,data,response) returns the 1-R^2 value of a m
 def stackGPModelComplexity(model,*args):
     return len(model[0])+len(model[1])-model[0].tolist().count("pop")
 stackGPModelComplexity.__doc__ = "stackGPModelComplexity(model) returns the complexity of the model"
+
+###################### Timeout function for model complexity ######################
+class TimeoutException(Exception): pass
+
+@contextmanager
+def time_limit(seconds):
+    def signal_handler(signum, frame):
+        raise TimeoutException("Timed out!")
+    signal.signal(signal.SIGALRM, signal_handler)
+    signal.alarm(seconds)
+    try:
+        yield
+    finally:
+        signal.alarm(0)
+####################################################################################
+
+# Counts basis terms in a model
+def count_basis_terms(equation):
+    try:
+        with time_limit(2):
+            # Step 1: Simplify the equation to standardize the expression
+            simplified_eq = simplify(equation)
+        
+            # Step 2: Expand the expression to identify additive terms clearly
+            expanded_eq = expand(simplified_eq)
+            
+            # Step 3: Separate the terms of the expression
+            terms = expanded_eq.as_ordered_terms()
+            #print(terms)
+            # Return the count of basis terms
+    except TimeoutException as e:
+        return 1000
+    return len(terms)
+
+# Determines the number of basis functions in a model by counting +s and -s
+def basisFunctionComplexity(model,*args):
+    try:
+        return count_basis_terms(printGPModel(model))
+    except:
+        return 1000
+
+# Creates a lambda function to be used as a complexity metric when given a target dimensionality and deviation
+def basisFunctionComplexityDiff(target, deviation):
+    return lambda model,*args: min(abs(basisFunctionComplexity(model)-target),(deviation))
+
+
 def setModelQuality(model,inputData,response,modelEvaluationMetrics=[fitness,stackGPModelComplexity]):
     model[2]=[i(model,inputData,response) for i in modelEvaluationMetrics]
+
     
 setModelQuality.__doc__ = "setModelQuality(model, inputdata, response, metrics=[r2,size]) is an inplace operator that sets a models quality"
 def stackPass(model,pt):
