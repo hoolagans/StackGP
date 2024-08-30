@@ -1,5 +1,5 @@
 from sympy import symbols, simplify, expand
-from StackGP import printGPModel
+
 
 import signal #for timing out functions
 from contextlib import contextmanager #for timing out functions
@@ -51,3 +51,5 @@ def basisFunctionComplexity(model,*args):
 # Creates a lambda function to be used as a complexity metric when given a target dimensionality and deviation
 def basisFunctionComplexityDiff(target, deviation):
     return lambda model,*args: min(abs(basisFunctionComplexity(model)-target),(deviation))
+
+from StackGP import printGPModel
