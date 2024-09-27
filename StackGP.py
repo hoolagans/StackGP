@@ -241,6 +241,51 @@ def time_limit(seconds):
         signal.alarm(0)
 ####################################################################################
 
+# Compute Hess
+def ComputeSymbolicHess(model,vars):
+    printedModel=sym.simplify(printGPModel(model))
+    if type(printedModel)==float:
+        return sym.matrices.dense.MutableDenseMatrix(np.zeros((vars,vars)))
+    hess=sym.hessian(printedModel, [symbols('x'+str(i)) for i in range(vars)])
+    return hess
+
+def EvaluateHess(hess,vars,values):
+    numHess=hess.subs({symbols('x'+str(j)):values[j] for j in range(vars)})
+    hessN = np.array(numHess).astype(float)
+    rankN=np.linalg.matrix_rank(hessN,tol=0.0001*0.0001*10)
+    return rankN
+
+def Approx2Deriv(model,values,diff1,diff2,positions): #maybe diff should be relative to the variation of each feature
+    term1=[values[i]+diff1 if i == positions[0] else values[i] for i in range(len(values))]
+    term1=[term1[i]+diff2 if i == positions[1] else term1[i] for i in range(len(term1))]
+    term2=[values[i]-diff1 if i == positions[0] else values[i] for i in range(len(values))]
+    term2=[term2[i]+diff2 if i == positions[1] else term2[i] for i in range(len(term2))]
+    term3=[values[i]+diff1 if i == positions[0] else values[i] for i in range(len(values))]
+    term3=[term3[i]-diff2 if i == positions[1] else term3[i] for i in range(len(term3))]
+    term4=[values[i]-diff1 if i == positions[0] else values[i] for i in range(len(values))]
+    term4=[term4[i]-diff2 if i == positions[1] else term4[i] for i in range(len(term4))]
+    return ((evaluateGPModel(model,term1)-evaluateGPModel(model,term2))/((2*diff1))
+            -(evaluateGPModel(model,term3)-evaluateGPModel(model,term4))/((2*diff1)))/(2*diff2)
+
+def ApproxHessRank(model,vars,values,diff1=0.001,diff2=0.001):
+    hess=[[Approx2Deriv(model,values,diff1,diff2,[i,j]) for i in range(vars)] for j in range(vars)]
+    hessN = np.array(hess).astype(float)
+    rankN=np.linalg.matrix_rank(hessN,tol=0.0001*0.0001*10)
+    return rankN
+
+def HessRank(model,vars,values):
+    try: 
+        with time_limit(1):
+            hess=ComputeSymbolicHess(model,vars)
+            return EvaluateHess(hess,vars,values)
+    except TimeoutException as e:
+        hess=ApproxHessRank(model,vars,values)
+        return hess
+
+
+
+
+
 # Counts basis terms in a model
 def count_basis_terms(equation, expand=False):
     try:
@@ -264,15 +309,15 @@ def count_basis_terms(equation, expand=False):
     return len(terms)
 
 # Determines the number of basis functions in a model by counting +s and -s
-def basisFunctionComplexity(model,*args):
-    try:
-        return count_basis_terms(printGPModel(model))
+def basisFunctionComplexity(model,vars, values,*args):
+    try: # values should be max, min, and median with respect to response variable
+        return HessRank(model,vars,values)#count_basis_terms(printGPModel(model))
     except:
         return 1000
 
 # Creates a lambda function to be used as a complexity metric when given a target dimensionality and deviation
-def basisFunctionComplexityDiff(target, deviation):
-    return lambda model,*args: min(abs(basisFunctionComplexity(model)-target),(deviation))
+def basisFunctionComplexityDiff(target, deviation, vars, low, mid, high):
+    return lambda model,*args: max(np.mean([abs(basisFunctionComplexity(model,vars,low)-target),abs(basisFunctionComplexity(model,vars,mid)-target) ,abs(basisFunctionComplexity(model,vars,high)-target)] ),(deviation))
 
 
 def setModelQuality(model,inputData,response,modelEvaluationMetrics=[fitness,stackGPModelComplexity]):
