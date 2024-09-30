@@ -317,7 +317,7 @@ def basisFunctionComplexity(model,vars, values,*args):
 
 # Creates a lambda function to be used as a complexity metric when given a target dimensionality and deviation
 def basisFunctionComplexityDiff(target, deviation, vars, low, mid, high):
-    return lambda model,*args: max(np.mean([abs(basisFunctionComplexity(model,vars,low)-target),abs(basisFunctionComplexity(model,vars,mid)-target) ,abs(basisFunctionComplexity(model,vars,high)-target)] ),(deviation))
+    return lambda model,*args: max(np.mean([abs(basisFunctionComplexity(model,vars,low)-target),abs(basisFunctionComplexity(model,vars,mid)-target) ,abs(basisFunctionComplexity(model,vars,high)-target)] ),(deviation))-deviation
 
 
 def setModelQuality(model,inputData,response,modelEvaluationMetrics=[fitness,stackGPModelComplexity]):
