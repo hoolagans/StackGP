@@ -1,0 +1,43 @@
+,Complexity,Tourney
+0,"[0.11914571935270002, 14]",[0.11304373817255298]
+1,"[array([<function mult at 0x3011a9b80>, 'pop',
+       <function sub at 0x3011a9af0>, <function sqrd at 0x3011a9dc0>,
+       <function mult at 0x3011a9b80>, <function sqrd at 0x3011a9dc0>,
+       'pop', <function sqrt at 0x3011a9d30>,
+       <function protectDiv at 0x1079fc160>, 'pop',
+       <function mult at 0x3011a9b80>], dtype=object), [<function variableSelect.<locals>.<lambda> at 0x3032271f0>, 2.6029412905280793, <function variableSelect.<locals>.<lambda> at 0x3032201f0>, <function variableSelect.<locals>.<lambda> at 0x3032229d0>, <function variableSelect.<locals>.<lambda> at 0x303222ee0>, <function variableSelect.<locals>.<lambda> at 0x303246ca0>], [0.11914571935270002, 14]]","[array(['pop', <function mult at 0x3011a9b80>, 'pop',
+       <function add at 0x3011a9a60>, 'pop',
+       <function add at 0x3011a9a60>, <function add at 0x3011a9a60>,
+       <function add at 0x3011a9a60>, <function add at 0x3011a9a60>,
+       'pop', <function mult at 0x3011a9b80>,
+       <function add at 0x3011a9a60>, 'pop',
+       <function sqrd at 0x3011a9dc0>, <function mult at 0x3011a9b80>,
+       <function sqrd at 0x3011a9dc0>, 'pop', 'pop',
+       <function sqrt at 0x3011a9d30>, <function sub at 0x3011a9af0>,
+       'pop', <function sqrd at 0x3011a9dc0>,
+       <function sub at 0x3011a9af0>, <function mult at 0x3011a9b80>],
+      dtype=object), [<function variableSelect.<locals>.<lambda> at 0x303233550>, <function variableSelect.<locals>.<lambda> at 0x303233ca0>, <function variableSelect.<locals>.<lambda> at 0x303230040>, <function variableSelect.<locals>.<lambda> at 0x303230af0>, <function variableSelect.<locals>.<lambda> at 0x3032301f0>, <function variableSelect.<locals>.<lambda> at 0x30321c820>, <function variableSelect.<locals>.<lambda> at 0x303268a60>, <function variableSelect.<locals>.<lambda> at 0x3032305e0>, <function variableSelect.<locals>.<lambda> at 0x3032330d0>, <function variableSelect.<locals>.<lambda> at 0x3032305e0>, <function variableSelect.<locals>.<lambda> at 0x303246c10>, <function variableSelect.<locals>.<lambda> at 0x303268040>, <function variableSelect.<locals>.<lambda> at 0x303268670>], [0.11304373817255298]]"
+2,"[array([<function mult at 0x3011a9b80>, 'pop',
+       <function sub at 0x3011a9af0>, <function sqrd at 0x3011a9dc0>,
+       <function mult at 0x3011a9b80>, <function sqrd at 0x3011a9dc0>,
+       'pop', <function sqrt at 0x3011a9d30>,
+       <function protectDiv at 0x1079fc160>, 'pop',
+       <function mult at 0x3011a9b80>, <function mult at 0x3011a9b80>,
+       <function add at 0x3011a9a60>], dtype=object), [<function variableSelect.<locals>.<lambda> at 0x3032271f0>, 2.6029412905280793, <function variableSelect.<locals>.<lambda> at 0x3032201f0>, <function variableSelect.<locals>.<lambda> at 0x3032229d0>, <function variableSelect.<locals>.<lambda> at 0x303222ee0>, <function variableSelect.<locals>.<lambda> at 0x303246ca0>, 8.22e-12, 3621.1470274579265], [0.11914571935269958, 18]]","[array(['pop', <function mult at 0x3011a9b80>, 'pop',
+       <function add at 0x3011a9a60>, 'pop',
+       <function add at 0x3011a9a60>, <function add at 0x3011a9a60>,
+       <function add at 0x3011a9a60>, <function add at 0x3011a9a60>,
+       'pop', <function mult at 0x3011a9b80>,
+       <function add at 0x3011a9a60>, 'pop',
+       <function sqrd at 0x3011a9dc0>, <function mult at 0x3011a9b80>,
+       <function sqrd at 0x3011a9dc0>, 'pop', 'pop',
+       <function sqrt at 0x3011a9d30>, <function sub at 0x3011a9af0>,
+       'pop', <function sqrd at 0x3011a9dc0>,
+       <function sub at 0x3011a9af0>, <function mult at 0x3011a9b80>,
+       <function mult at 0x3011a9b80>, <function add at 0x3011a9a60>],
+      dtype=object), [<function variableSelect.<locals>.<lambda> at 0x303233550>, <function variableSelect.<locals>.<lambda> at 0x303233ca0>, <function variableSelect.<locals>.<lambda> at 0x303230040>, <function variableSelect.<locals>.<lambda> at 0x303230af0>, <function variableSelect.<locals>.<lambda> at 0x3032301f0>, <function variableSelect.<locals>.<lambda> at 0x30321c820>, <function variableSelect.<locals>.<lambda> at 0x303268a60>, <function variableSelect.<locals>.<lambda> at 0x3032305e0>, <function variableSelect.<locals>.<lambda> at 0x3032330d0>, <function variableSelect.<locals>.<lambda> at 0x3032305e0>, <function variableSelect.<locals>.<lambda> at 0x303246c10>, <function variableSelect.<locals>.<lambda> at 0x303268040>, <function variableSelect.<locals>.<lambda> at 0x303268670>, 0.0, 3190.006733163353], [nan, 33]]"
+3,45.904735646261*x4*x6**2*(-0.384180774126151*x4 + x9)**4/sqrt(x13),x4**4*(x12 + x4*(x1 + 2*x10 + x11*x8 + x11 + x6))**2*(-sqrt(x14) + x4 - x9**2)
+4,3621.14702745793 + 3.77336927012266e-10*x4*x6**2*(-0.384180774126151*x4 + x9)**4/sqrt(x13),3190.00673316335
+5,0.18517148676546424,0.16745030418524098
+6,0.18517148676546424,
+7,7244448335757077.0,3.182517998441464e+20
