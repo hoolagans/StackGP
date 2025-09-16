@@ -214,6 +214,10 @@ def evModHelper(varStack,opStack,tempStack,data): #Recursive helper function for
         
     return [stack1,stack2,stack3]
 evModHelper.__doc__ = "evModHelper(varStack,opStack,tempStack,data) is a helper function for evaluateGPModel"
+def rmse(model, inputData, response):
+    predictions = evaluateGPModel(model, inputData)
+    return np.sqrt(np.mean((predictions - response) ** 2))
+rmse.__doc__ = "rmse(model, input, response) is a fitness objective that evaluates the root mean squared error"
 def binaryError(model, input, response):
     prediction=evaluateGPModel(model,input)
     error=np.mean(np.abs(prediction-response))
