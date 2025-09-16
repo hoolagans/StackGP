@@ -68,14 +68,33 @@ def tanh(a):
 def log(a):
     return np.log(a)
 
+def and1(a,b):
+    return np.logical_and(a,b)
+def or1(a,b):
+    return np.logical_or(a,b)
+def xor1(a,b):
+    return np.logical_xor(a,b)
+def nand1(a,b):
+    return np.logical_not(np.logical_and(a,b))
+def nor1(a,b):
+    return np.logical_not(np.logical_or(a,b))
+def xnor1(a,b):
+    return np.logical_not(np.logical_xor(a,b))
+def not1(a):
+    return np.logical_not(a)
+
 def defaultOps():
     return [protectDiv,add,sub,mult,exp,sqrd,sqrt,inv,"pop","pop","pop","pop","pop","pop"]
 def allOps():
     return [protectDiv,add,sub,mult,exp,sqrd,sqrt,inv,cos,sin,tan,arccos,arcsin,arctan,tanh,log,"pop","pop","pop","pop","pop","pop","pop","pop","pop","pop"]
+def booleanOps():
+    return [and1,or1,xor1,nand1,nor1,xnor1,not1,"pop","pop","pop","pop","pop","pop","pop"]
 def randomInt(a=-3,b=3):
     return random.randint(a,b)
 def defaultConst():
     return [np.pi, np.e, randomInt,ranReal ]
+def booleanConst():
+    return [1,0]
 def ranReal(a=20,b=-10):
     return random.random()*a-b
 
@@ -195,6 +214,12 @@ def evModHelper(varStack,opStack,tempStack,data): #Recursive helper function for
         
     return [stack1,stack2,stack3]
 evModHelper.__doc__ = "evModHelper(varStack,opStack,tempStack,data) is a helper function for evaluateGPModel"
+def binaryError(model, input, response):
+    prediction=evaluateGPModel(model,input)
+    error=np.mean(np.abs(prediction-response))
+    if np.isnan(error) or np.isinf(error) or error > 1 or error < 0:
+        return 0.5
+    return min(error,1 - error)
 def fitness(prog,data,response): # Fitness function using correlation
     predicted=evaluateGPModel(prog,np.array(data))
     if type(predicted)!=list and type(predicted)!=np.ndarray:
@@ -503,7 +528,7 @@ def alignGPModel(model, data, response): #Aligns a model
     setModelQuality(newModel,data,response)
     return newModel
 alignGPModel.__doc__ = "alignGPModel(model, input, response) aligns a model such that response-a*f(x)+b are minimized over a and b"
-def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=defaultConst(), variableNames=[], mutationRate=79, crossoverRate=11, spawnRate=10, extinction=False,extinctionRate=10,elitismRate=50,popSize=300,maxComplexity=100,align=True,initialPop=[],timeLimit=300,capTime=False,tourneySize=5,tracking=False,modelEvaluationMetrics=[fitness,stackGPModelComplexity],dataSubsample=False,samplingMethod=randomSubsample):
+def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=defaultConst(), variableNames=[], mutationRate=79, crossoverRate=11, spawnRate=10, extinction=False,extinctionRate=10,elitismRate=10,popSize=300,maxComplexity=100,align=True,initialPop=[],timeLimit=300,capTime=False,tourneySize=5,tracking=False,modelEvaluationMetrics=[fitness,stackGPModelComplexity],dataSubsample=False,samplingMethod=randomSubsample):
     
     fullInput,fullResponse=copy.deepcopy(inputData),copy.deepcopy(responseData)
     inData=copy.deepcopy(fullInput)
