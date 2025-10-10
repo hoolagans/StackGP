@@ -532,8 +532,10 @@ def alignGPModel(model, data, response): #Aligns a model
     setModelQuality(newModel,data,response)
     return newModel
 alignGPModel.__doc__ = "alignGPModel(model, input, response) aligns a model such that response-a*f(x)+b are minimized over a and b"
-def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=defaultConst(), variableNames=[], mutationRate=79, crossoverRate=11, spawnRate=10, extinction=False,extinctionRate=10,elitismRate=10,popSize=300,maxComplexity=100,align=True,initialPop=[],timeLimit=300,capTime=False,tourneySize=5,tracking=False,modelEvaluationMetrics=[fitness,stackGPModelComplexity],dataSubsample=False,samplingMethod=randomSubsample):
+def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=defaultConst(), variableNames=[], mutationRate=79, crossoverRate=11, spawnRate=10, extinction=False,extinctionRate=10,elitismRate=50,popSize=300,maxComplexity=100,align=True,initialPop=[],timeLimit=300,capTime=False,tourneySize=5,tracking=False,modelEvaluationMetrics=[fitness,stackGPModelComplexity],dataSubsample=False,samplingMethod=randomSubsample,alternateObjectives=[],alternateObjFrequency=10,allowEarlyTermination=False,earlyTerminationThreshold=0):
     
+    metrics=modelEvaluationMetrics
+
     fullInput,fullResponse=copy.deepcopy(inputData),copy.deepcopy(responseData)
     inData=copy.deepcopy(fullInput)
     resData=copy.deepcopy(fullResponse)
@@ -545,11 +547,18 @@ def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=def
     for i in range(generations):
         if capTime and time.perf_counter()-startTime>timeLimit:
             break
+        if len(alternateObjectives)>0 and (i+1)%alternateObjFrequency==0:
+            metrics=modelEvaluationMetrics[:1]+alternateObjectives
+        else:
+            metrics=modelEvaluationMetrics
         if dataSubsample:
             inData,resData=samplingMethod(fullInput,fullResponse)
         for mods in models:
-            setModelQuality(mods,inData,resData,modelEvaluationMetrics=modelEvaluationMetrics)
+            setModelQuality(mods,inData,resData,modelEvaluationMetrics=metrics)
         models=removeIndeterminateModels(models)
+        if allowEarlyTermination and min([mods[2][0] for mods in models])<=earlyTerminationThreshold:
+            print("Early termination at generation ", i)
+            break
         if tracking:
             bestFits.append(min([mods[2][0] for mods in paretoTournament(models)]))
 
@@ -558,7 +567,7 @@ def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=def
         if extinction and i%extinctionRate:
             models=initializeGPModels(variableCount,ops,const,popSize)
             for mods in models:
-                setModelQuality(mods,inData,resData,modelEvaluationMetrics=modelEvaluationMetrics)
+                setModelQuality(mods,inData,resData,modelEvaluationMetrics=metrics)
         
         models=tournamentModelSelection(models,popSize,tourneySize)
         
@@ -589,7 +598,7 @@ def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=def
         
     
     for mods in models:
-        setModelQuality(mods,fullInput,fullResponse,modelEvaluationMetrics=modelEvaluationMetrics)
+        setModelQuality(mods,fullInput,fullResponse,modelEvaluationMetrics=modelEvaluationMetrics+alternateObjectives)
     models=[trimModel(mod) for mod in models]
     models=deleteDuplicateModels(models)
     models=removeIndeterminateModels(models)
