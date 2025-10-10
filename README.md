@@ -16,4 +16,4 @@ StackGPVis.ipynb contains some plotting features in development.
 
 ## Documentation for StackGP: 
 
-https://hoolagans.github.io/StackGP-Documentation/Notebooks/Evolve.html 
+https://hoolagans.github.io/StackGP-Documentation
