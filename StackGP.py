@@ -18,7 +18,13 @@ import dill
 import os
 from sklearn.cluster import KMeans #for clustering in ensemble definition
 from scipy.optimize import minimize #for uncertainty maximization
-from sympy import symbols
+from sympy import symbols, simplify, expand
+import sympy as sym
+from IPython.display import display, clear_output
+
+import signal #for timing out functions
+from contextlib import contextmanager #for timing out functions
+
 warnings.filterwarnings('ignore', '.*invalid value.*' )
 warnings.filterwarnings('ignore', '.*overflow.*' )
 warnings.filterwarnings('ignore', '.*divide by.*' )
@@ -68,33 +74,14 @@ def tanh(a):
 def log(a):
     return np.log(a)
 
-def and1(a,b):
-    return np.logical_and(a,b)
-def or1(a,b):
-    return np.logical_or(a,b)
-def xor1(a,b):
-    return np.logical_xor(a,b)
-def nand1(a,b):
-    return np.logical_not(np.logical_and(a,b))
-def nor1(a,b):
-    return np.logical_not(np.logical_or(a,b))
-def xnor1(a,b):
-    return np.logical_not(np.logical_xor(a,b))
-def not1(a):
-    return np.logical_not(a)
-
 def defaultOps():
     return [protectDiv,add,sub,mult,exp,sqrd,sqrt,inv,"pop","pop","pop","pop","pop","pop"]
 def allOps():
     return [protectDiv,add,sub,mult,exp,sqrd,sqrt,inv,cos,sin,tan,arccos,arcsin,arctan,tanh,log,"pop","pop","pop","pop","pop","pop","pop","pop","pop","pop"]
-def booleanOps():
-    return [and1,or1,xor1,nand1,nor1,xnor1,not1,"pop","pop","pop","pop","pop","pop","pop"]
 def randomInt(a=-3,b=3):
     return random.randint(a,b)
 def defaultConst():
     return [np.pi, np.e, randomInt,ranReal ]
-def booleanConst():
-    return [1,0]
 def ranReal(a=20,b=-10):
     return random.random()*a-b
 
@@ -218,12 +205,6 @@ def rmse(model, inputData, response):
     predictions = evaluateGPModel(model, inputData)
     return np.sqrt(np.mean((predictions - response) ** 2))
 rmse.__doc__ = "rmse(model, input, response) is a fitness objective that evaluates the root mean squared error"
-def binaryError(model, input, response):
-    prediction=evaluateGPModel(model,input)
-    error=np.mean(np.abs(prediction-response))
-    if np.isnan(error) or np.isinf(error) or error > 1 or error < 0:
-        return 0.5
-    return min(error,1 - error)
 def fitness(prog,data,response): # Fitness function using correlation
     predicted=evaluateGPModel(prog,np.array(data))
     if type(predicted)!=list and type(predicted)!=np.ndarray:
@@ -249,8 +230,111 @@ fitness.__doc__ = "fitness(program,data,response) returns the 1-R^2 value of a m
 def stackGPModelComplexity(model,*args):
     return len(model[0])+len(model[1])-model[0].tolist().count("pop")
 stackGPModelComplexity.__doc__ = "stackGPModelComplexity(model) returns the complexity of the model"
+
+###################### Timeout function for model complexity ######################
+class TimeoutException(Exception): pass
+
+@contextmanager
+def time_limit(seconds):
+    def signal_handler(signum, frame):
+        raise TimeoutException("Timed out!")
+    signal.signal(signal.SIGALRM, signal_handler)
+    signal.alarm(seconds)
+    try:
+        yield
+    finally:
+        signal.alarm(0)
+####################################################################################
+
+# Compute Hess
+def ComputeSymbolicHess(model,vars):
+    printedModel=sym.simplify(printGPModel(model))
+    if type(printedModel)==float:
+        return sym.matrices.dense.MutableDenseMatrix(np.zeros((vars,vars)))
+    hess=sym.hessian(printedModel, [symbols('x'+str(i)) for i in range(vars)])
+    return hess
+
+def EvaluateHess(hess,vars,values):
+    numHess=hess.subs({symbols('x'+str(j)):values[j] for j in range(vars)})
+    hessN = np.array(numHess).astype(float)
+    rankN=np.linalg.matrix_rank(hessN,tol=0.0001*0.0001*10)
+    return rankN
+
+def Approx2Deriv(model,values,diff1,diff2,positions): #maybe diff should be relative to the variation of each feature
+    term1=[values[i]+diff1 if i == positions[0] else values[i] for i in range(len(values))]
+    term1=[term1[i]+diff2 if i == positions[1] else term1[i] for i in range(len(term1))]
+    term2=[values[i]-diff1 if i == positions[0] else values[i] for i in range(len(values))]
+    term2=[term2[i]+diff2 if i == positions[1] else term2[i] for i in range(len(term2))]
+    term3=[values[i]+diff1 if i == positions[0] else values[i] for i in range(len(values))]
+    term3=[term3[i]-diff2 if i == positions[1] else term3[i] for i in range(len(term3))]
+    term4=[values[i]-diff1 if i == positions[0] else values[i] for i in range(len(values))]
+    term4=[term4[i]-diff2 if i == positions[1] else term4[i] for i in range(len(term4))]
+    return ((evaluateGPModel(model,term1)-evaluateGPModel(model,term2))/((2*diff1))
+            -(evaluateGPModel(model,term3)-evaluateGPModel(model,term4))/((2*diff1)))/(2*diff2)
+
+def ApproxHessRank(model,vars,values,diff1=0.001,diff2=0.001):
+    hess=[[Approx2Deriv(model,values,diff1,diff2,[i,j]) for i in range(vars)] for j in range(vars)]
+    hessN = np.array(hess).astype(float)
+    rankN=np.linalg.matrix_rank(hessN,tol=0.0001*0.0001*10)
+    return rankN
+
+#def HessRank(model,vars,values):
+#    try: 
+#        with time_limit(.01):
+#            hess=ComputeSymbolicHess(model,vars)
+#            hess = EvaluateHess(hess,vars,values)
+#            #print(hess)
+#            return hess
+#    except TimeoutException as e:
+#        hess=ApproxHessRank(model,vars,values)
+        #print(hess)
+#        return hess
+
+def HessRank(model,vars,values):
+    hess=ApproxHessRank(model,vars,values)
+    return hess
+
+
+
+
+
+# Counts basis terms in a model
+def count_basis_terms(equation, expand=False):
+    try:
+        with time_limit(2):
+
+
+            if expand:
+                # Simplify the equation to standardize the expression
+                simplified_eq = simplify(equation)
+                # Expand the expression to identify additive terms clearly
+                expanded_eq = expand(simplified_eq)
+            
+                # Separate the terms of the expression
+                terms = expanded_eq.as_ordered_terms()
+            else:
+                terms = equation.as_ordered_terms()
+            #print(terms)
+            
+    except TimeoutException as e:
+        return 1000
+    return len(terms)
+
+# Determines the number of basis functions in a model by counting +s and -s
+def basisFunctionComplexity(model,vars, values,*args):
+    try: # values should be max, min, and median with respect to response variable
+        return HessRank(model,vars,values)#count_basis_terms(printGPModel(model))
+    except:
+        return 1000
+
+# Creates a lambda function to be used as a complexity metric when given a target dimensionality and deviation
+def basisFunctionComplexityDiff(target, deviation, vars, low, mid, high):
+    return lambda model,*args: max(np.mean([abs(basisFunctionComplexity(model,vars,low)-target),abs(basisFunctionComplexity(model,vars,mid)-target) ,abs(basisFunctionComplexity(model,vars,high)-target)] ),(deviation))-deviation
+
+
 def setModelQuality(model,inputData,response,modelEvaluationMetrics=[fitness,stackGPModelComplexity]):
     model[2]=[i(model,inputData,response) for i in modelEvaluationMetrics]
+
     
 setModelQuality.__doc__ = "setModelQuality(model, inputdata, response, metrics=[r2,size]) is an inplace operator that sets a models quality"
 def stackPass(model,pt):
@@ -522,7 +606,7 @@ def alignGPModel(model, data, response): #Aligns a model
     if np.isnan(np.array(prediction)).any() or np.isnan(np.array(response)).any() or not np.isfinite(np.array(prediction,dtype=np.float32)).all():
         return model
     try:
-        align=np.round(np.polyfit(prediction,response,1,rcond=1e-16),decimals=14)
+        align=np.polyfit(prediction,response,1,rcond=1e-16)#np.round(np.polyfit(prediction,response,1,rcond=1e-16),decimals=14)
     except np.linalg.LinAlgError:
         #print("Alignment failed for: ", model, " with prediction: ", prediction, "and reference data: ", response)
         return model
@@ -532,7 +616,7 @@ def alignGPModel(model, data, response): #Aligns a model
     setModelQuality(newModel,data,response)
     return newModel
 alignGPModel.__doc__ = "alignGPModel(model, input, response) aligns a model such that response-a*f(x)+b are minimized over a and b"
-def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=defaultConst(), variableNames=[], mutationRate=79, crossoverRate=11, spawnRate=10, extinction=False,extinctionRate=10,elitismRate=50,popSize=300,maxComplexity=100,align=True,initialPop=[],timeLimit=300,capTime=False,tourneySize=5,tracking=False,modelEvaluationMetrics=[fitness,stackGPModelComplexity],dataSubsample=False,samplingMethod=randomSubsample,alternateObjectives=[],alternateObjFrequency=10,allowEarlyTermination=False,earlyTerminationThreshold=0):
+def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=defaultConst(), variableNames=[], mutationRate=79, crossoverRate=11, spawnRate=10, extinction=False,extinctionRate=10,elitismRate=50,popSize=300,maxComplexity=100,align=True,initialPop=[],timeLimit=300,capTime=False,tourneySize=5,tracking=False,liveTracking=False,liveTrackingInterval=1,modelEvaluationMetrics=[fitness,stackGPModelComplexity],dataSubsample=False,samplingMethod=randomSubsample,alternateObjectives=[],alternateObjFrequency=10,allowEarlyTermination=False,earlyTerminationThreshold=0):
     
     metrics=modelEvaluationMetrics
 
@@ -544,6 +628,9 @@ def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=def
     models=models+initialPop
     startTime=time.perf_counter()
     bestFits=[]
+    if liveTracking:
+        fig, ax = plt.subplots(figsize=(20,10))
+        ckTime=time.perf_counter()
     for i in range(generations):
         if capTime and time.perf_counter()-startTime>timeLimit:
             break
@@ -559,8 +646,19 @@ def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=def
         if allowEarlyTermination and min([mods[2][0] for mods in models])<=earlyTerminationThreshold:
             print("Early termination at generation ", i)
             break
-        if tracking:
+        if tracking or liveTracking:
             bestFits.append(min([mods[2][0] for mods in paretoTournament(models)]))
+        if liveTracking and time.perf_counter()-ckTime>liveTrackingInterval:
+            ax.clear()
+            ax.plot(bestFits)
+            ax.set_title(f"Best Model: {bestFits[-1]:.2f} at Generation {(i+1)}")
+            ax.set_xlabel("Generations")
+            ax.set_ylabel("Fitness")
+            clear_output(wait=True) 
+            display(fig)    
+            #plt.show()        
+            plt.close(fig)
+            ckTime=time.perf_counter()        
 
         #paretoModels=paretoTournament(models)
         paretoModels=selectModels(models,elitismRate/100*popSize if elitismRate/100*popSize<len(models) else len(models))
