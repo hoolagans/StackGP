@@ -688,7 +688,7 @@ def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=def
 
         #paretoModels=paretoTournament(models)
         paretoModels=selectModels(models,elitismRate/100*popSize if elitismRate/100*popSize<len(models) else len(models))
-        if extinction and i%extinctionRate:
+        if extinction and i%extinctionRate==0 and i>0:
             models=initializeGPModels(variableCount,ops,const,popSize)
             for mods in models:
                 setModelQuality(mods,inData,resData,modelEvaluationMetrics=metrics)
