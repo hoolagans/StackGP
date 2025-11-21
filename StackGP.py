@@ -576,16 +576,18 @@ removeIndeterminateModels.__doc__ = "removeIndeterminateModels(models) removes m
 def sortModels(models):
     return sorted(models, key=lambda m:m[2])
 sortModels.__doc__ = "sortModels(models) sorts a model population by the models' accuracies"
-def selectModels(models, selectionSize=0.5):
+def selectModels(models, selectionSize=0.5, thresholds=None):
     tMods=copy.deepcopy(models)
     [modelToListForm(mod) for mod in tMods]
+    if thresholds is not None:
+        tMods=[mod for mod in tMods if all([mod[2][i]<=thresholds[i] for i in range(len(thresholds))])]
     paretoModels=[]
     if selectionSize<=1:
         selection=selectionSize*len(models)
     else:
         selection=selectionSize
     
-    while len(paretoModels)<selection:
+    while len(paretoModels)<selection and len(tMods)>0:
         front=paretoTournament(tMods)
         paretoModels=paretoModels+front
         for i in front:
