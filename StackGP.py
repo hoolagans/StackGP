@@ -812,8 +812,19 @@ def uncertainty(data,trim=0.3):
         return h
     else:
         return 0
-    
+
 def evaluateModelEnsemble(ensemble, inputData):
+    responses=[evaluateGPModel(mod, inputData) for mod in ensemble]
+    if type(responses[0])==np.ndarray:
+        responses=np.transpose(responses)
+        predictions=[np.median(res) for res in responses]
+    else:
+        
+        predictions=[np.median(responses)]
+    
+    return predictions
+    
+def evaluateModelEnsembleUncertainty(ensemble, inputData):
     responses=[evaluateGPModel(mod, inputData) for mod in ensemble]
     if type(responses[0])==np.ndarray:
         responses=np.transpose(responses)
@@ -821,10 +832,10 @@ def evaluateModelEnsemble(ensemble, inputData):
     else:
         
         uncertainties=[uncertainty(responses,0)]
-    
     return uncertainties
+
 def relativeEnsembleUncertainty(ensemble,inputData):
-    output=evaluateModelEnsemble(ensemble,inputData)
+    output=evaluateModelEnsembleUncertainty(ensemble,inputData)
     return np.array(output)
     
 def createUncertaintyFunc(ensemble):
