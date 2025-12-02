@@ -123,6 +123,18 @@ def generationProportionalSample(x,y,generation=100,generations=100):
     idx=np.random.choice(range(x.shape[1]),n,replace=False)
     return np.array([i[idx] for i in x]),y[idx]
 
+def ordinalSample(x,y,generation=100,generations=100):
+    n=max(int(len(y)*generation/generations),3)
+    sortedIdx=np.argsort(y)
+    step=len(y)/(n-1)
+    idx=[sortedIdx[max(int(i*step)-1,0)] for i in range(n)]
+    return np.array([i[idx] for i in x]),y[idx]
+
+def orderedSaple(x,y,generation=100,generations=100):
+    n=max(int(len(y)*generation/generations),3)
+    idx=[i for i in range(n)]
+    return np.array([i[idx] for i in x]),y[idx]
+
 import inspect
 def getArity(func): #Returns the arity of a function: used for model evaluations
     if func=="pop":
