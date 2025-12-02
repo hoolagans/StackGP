@@ -50,6 +50,10 @@ def exp(a):
 # def sine(a,b):
 #     return np.sin(a)
 def power(a,b):
+    if (type(a)==int or type(a)==float or type(a)==np.float64) and a==0:
+        return a/math.nan
+    if (type(a)==np.ndarray) and (0 in a):
+        return a/np.where(a==0,math.nan,a)
     return a**b
 def sqrt(a):
     return np.sqrt(a)
@@ -109,7 +113,7 @@ def ranReal(a=20,b=-10):
 ############################
 #Data Subsampling Methods
 ############################
-def randomSubsample(x,y):
+def randomSubsample(x,y, *args, **kwargs):
     n=max(int(np.ceil(len(y)**(3/5))),3)
     idx=np.random.choice(range(x.shape[1]),n,replace=False)
     return np.array([i[idx] for i in x]),y[idx]
@@ -223,6 +227,8 @@ def evModHelper(varStack,opStack,tempStack,data): #Recursive helper function for
 evModHelper.__doc__ = "evModHelper(varStack,opStack,tempStack,data) is a helper function for evaluateGPModel"
 def rmse(model, inputData, response):
     predictions = evaluateGPModel(model, inputData)
+    if not all(np.isfinite(predictions)) or any(np.iscomplex(predictions)):
+        return np.nan
     return np.sqrt(np.mean((predictions - response) ** 2))
 rmse.__doc__ = "rmse(model, input, response) is a fitness objective that evaluates the root mean squared error"
 def binaryError(model, input, response):
@@ -667,7 +673,7 @@ def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=def
         else:
             metrics=modelEvaluationMetrics
         if dataSubsample:
-            inData,resData=samplingMethod(fullInput,fullResponse)
+            inData,resData=samplingMethod(fullInput,fullResponse,generations=generations,generation=i)
         for mods in models:
             setModelQuality(mods,inData,resData,modelEvaluationMetrics=metrics)
         models=removeIndeterminateModels(models)
