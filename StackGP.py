@@ -135,6 +135,20 @@ def orderedSample(x,y,generation=100,generations=100):
     idx=[i for i in range(n)]
     return np.array([i[idx] for i in x]),y[idx]
 
+def balancedSample(x,y,generation=100,generations=100):
+    n=max(int(len(y)*generation/generations),3)
+    numBins=int(max(np.ceil(np.sqrt(n)),3))
+    bins=np.linspace(min(y),max(y),numBins+1)
+    binIdx=np.digitize(y,bins)-1
+    samplesPerBin=max(int(n/numBins),1)
+    idx=[]
+    for i in range(numBins):
+        binMembers=[j for j in range(len(y)) if binIdx[j]==i]
+        if len(binMembers)>0:
+            chosen=np.random.choice(binMembers,min(samplesPerBin,len(binMembers)),replace=False)
+            idx=idx+chosen.tolist()
+    return np.array([i[idx] for i in x]),y[idx]
+
 import inspect
 def getArity(func): #Returns the arity of a function: used for model evaluations
     if func=="pop":
