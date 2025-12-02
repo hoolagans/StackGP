@@ -130,7 +130,7 @@ def ordinalSample(x,y,generation=100,generations=100):
     idx=[sortedIdx[max(int(i*step)-1,0)] for i in range(n)]
     return np.array([i[idx] for i in x]),y[idx]
 
-def orderedSaple(x,y,generation=100,generations=100):
+def orderedSample(x,y,generation=100,generations=100):
     n=max(int(len(y)*generation/generations),3)
     idx=[i for i in range(n)]
     return np.array([i[idx] for i in x]),y[idx]
