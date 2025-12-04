@@ -149,7 +149,7 @@ def ordinalBalancedSample(x,y,generation=100,generations=100):
             idx=idx+chosen.tolist()
     return np.array([i[idx] for i in x]),y[idx]
 
-def balancedSample(x,y):
+def balancedSample(x,y, *args, **kwargs):
     n=int(np.ceil(len(y)**(3/5)))
     numBins=max(n,3)
     bins=np.linspace(min(y),max(y),numBins+1)
