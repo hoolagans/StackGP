@@ -1229,7 +1229,7 @@ def runEpochs(x,y,epochs=5,**kwargs):
 def generateRandomBenchmark(numVars=5, numSamples=100, noiseLevel=0, opsChoices=defaultOps(), constChoices=defaultConst(), maxLength=10):
 
     # Generate random input data
-    inputData = np.random.rand(numSamples, numVars)
+    inputData = np.random.rand(numVars, numSamples)
 
     # Generate a random target function
     randomModel = generateRandomModel(numVars, opsChoices, constChoices, maxLength)
