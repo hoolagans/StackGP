@@ -1226,7 +1226,7 @@ def runEpochs(x,y,epochs=5,**kwargs):
 ############################
 #Benchmarking
 ############################
-def generateRandomBenchmark(numVars, numSamples, noiseLevel=0, opsChoices=defaultOps(), constChoices=defaultConst(), maxLength=10):
+def generateRandomBenchmark(numVars=5, numSamples=100, noiseLevel=0, opsChoices=defaultOps(), constChoices=defaultConst(), maxLength=10):
 
     # Generate random input data
     inputData = np.random.rand(numSamples, numVars)
