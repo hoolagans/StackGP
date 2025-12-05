@@ -992,7 +992,7 @@ def activeLearning(func, dims, ranges,rangesP,eqNum=1,version=1,iterations=100):
         file.close()
         return -1
 
-def plotModels(models):
+def plotModels(models, modelExpression=False):
     tMods=copy.deepcopy(models)
     [modelToListForm(mod) for mod in tMods]
     paretoModels=paretoTournament(tMods)
@@ -1013,7 +1013,11 @@ def plotModels(models):
     sc=plt.scatter(complexities,accuracies,color=colors)
     plt.xlabel("Complexity")
     plt.ylabel("1-R**2")
-    names=[str(printGPModel(mod)) for mod in tMods]+[str(printGPModel(mod)) for mod in paretoModels]
+
+    if modelExpression:
+        names=[str(printGPModel(mod)) for mod in tMods]+[str(printGPModel(mod)) for mod in paretoModels]
+    else:
+        names = [str(mod) for mod in tMods]+[str(mod) for mod in paretoModels]
     
     label = ax.annotate("", xy=(0,0), xytext=(np.min(complexities),np.mean([np.max(accuracies),np.min(accuracies)])),
                         bbox=dict(boxstyle="round", fc="w"),
