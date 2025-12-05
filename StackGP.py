@@ -1221,3 +1221,25 @@ def runEpochs(x,y,epochs=5,**kwargs):
         models+=evolve(x,y,**kwargs)
 
     return sortModels(models)
+
+
+############################
+#Benchmarking
+############################
+def generateRandomBenchmark(numVars, numSamples, noiseLevel=0, opsChoices=defaultOps(), constChoices=defaultConst(), maxLength=10):
+
+    # Generate random input data
+    inputData = np.random.rand(numSamples, numVars)
+
+    # Generate a random target function
+    randomModel = generateRandomModel(numVars, opsChoices, constChoices, maxLength)
+
+    # Evaluate the model to get response data
+    responseData = evaluateGPModel(randomModel, inputData)
+
+    # Add noise if specified
+    if noiseLevel > 0:
+        noise = np.random.normal(0, noiseLevel, size=responseData.shape)
+        responseData += noise
+
+    return inputData, responseData, randomModel
