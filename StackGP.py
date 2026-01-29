@@ -20,7 +20,10 @@ from sklearn.cluster import KMeans #for clustering in ensemble definition
 from scipy.optimize import minimize #for uncertainty maximization
 from sympy import symbols, simplify, expand
 import sympy as sym
-from IPython.display import display, clear_output
+try:
+    from IPython.display import display, clear_output
+except:
+    pass
 
 import signal #for timing out functions
 from contextlib import contextmanager #for timing out functions
