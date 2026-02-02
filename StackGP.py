@@ -64,6 +64,8 @@ def sqrd(a):
     return a**2
 def inv(a):
     return np.array(a).astype(float)**(-1)
+def neg(a):
+    return -a
 def sin(a):
     return np.sin(a)
 def cos(a):
@@ -80,6 +82,12 @@ def tanh(a):
     return np.tanh(a)
 def log(a):
     return np.log(a)
+def log10(a):
+    return np.log10(a)
+def log2(a):
+    return np.log2(a)
+def abs1(a):
+    return np.abs(a)
 
 def and1(a,b):
     return np.logical_and(a,b)
@@ -98,9 +106,9 @@ def not1(a):
 
 
 def defaultOps():
-    return [protectDiv,add,sub,mult,exp,sqrd,sqrt,inv,"pop","pop","pop","pop","pop","pop"]
+    return [protectDiv,add,sub,mult,exp,sqrd,sqrt,inv,neg,"pop","pop","pop","pop","pop","pop"]
 def allOps():
-    return [protectDiv,add,sub,mult,exp,sqrd,sqrt,inv,cos,sin,tan,arccos,arcsin,arctan,tanh,log,"pop","pop","pop","pop","pop","pop","pop","pop","pop","pop"]
+    return [protectDiv,add,sub,mult,exp,sqrd,sqrt,inv,neg,cos,sin,tan,arccos,arcsin,arctan,tanh,log,"pop","pop","pop","pop","pop","pop","pop","pop","pop","pop"]
 def booleanOps():
     return [and1,or1,xor1,nand1,nor1,xnor1,not1,"pop","pop","pop","pop","pop","pop","pop"]
 def randomInt(a=-3,b=3):
