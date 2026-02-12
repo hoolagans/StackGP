@@ -823,7 +823,10 @@ def printGPModel(mod,inputData=symbols(["x"+str(i) for i in range(100)])): #Eval
     model[0] = replaceFunc(model[0],arctan,atan)
     model[0] = replaceFunc(model[0],tanh,tanh1)
     model[0] = replaceFunc(model[0],log,log2)
-    response=evModHelper(model[1],model[0],[],np.array(inputData))[2][0]
+    try:
+        response=evModHelper(model[1],model[0],[],np.array(inputData))[2][0]
+    except:
+        return np.nan
     return response
 
 def ensembleSelect(models, inputData, responseData, numberOfClusters=10): #Generates a model ensemble using input data partitions
