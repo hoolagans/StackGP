@@ -701,7 +701,7 @@ def alignGPModel(model, data, response): #Aligns a model
     setModelQuality(newModel,data,response)
     return newModel
 alignGPModel.__doc__ = "alignGPModel(model, input, response) aligns a model such that response-a*f(x)+b are minimized over a and b"
-def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=defaultConst(), variableNames=[], mutationRate=79, crossoverRate=11, spawnRate=10, extinction=False,extinctionRate=10,elitismRate=50,popSize=300,maxComplexity=100,align=True,initialPop=[],timeLimit=300,capTime=False,tourneySize=5,tracking=False,liveTracking=False,liveTrackingInterval=1,modelEvaluationMetrics=[fitness,stackGPModelComplexity],dataSubsample=False,samplingMethod=randomSubsample,alternateObjectives=[],alternateObjFrequency=10,allowEarlyTermination=False,earlyTerminationThreshold=0):
+def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=defaultConst(), variableNames=[], mutationRate=79, crossoverRate=11, spawnRate=10, extinction=False,extinctionRate=10,elitismRate=10,popSize=300,maxComplexity=100,align=True,initialPop=[],timeLimit=300,capTime=False,tourneySize=5,tracking=False,returnTracking=False,liveTracking=False,liveTrackingInterval=1,modelEvaluationMetrics=[fitness,stackGPModelComplexity],dataSubsample=False,samplingMethod=randomSubsample,alternateObjectives=[],alternateObjFrequency=10,allowEarlyTermination=False,earlyTerminationThreshold=0):
     
     metrics=modelEvaluationMetrics
 
@@ -731,7 +731,7 @@ def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=def
         if allowEarlyTermination and min([mods[2][0] for mods in models])<=earlyTerminationThreshold:
             print("Early termination at generation ", i)
             break
-        if tracking or liveTracking:
+        if tracking or liveTracking or returnTracking:
             bestFits.append(min([mods[2][0] for mods in paretoTournament(models)]))
         if liveTracking and time.perf_counter()-ckTime>liveTrackingInterval:
             ax.clear()
@@ -789,8 +789,10 @@ def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=def
     if align:
         models=[alignGPModel(mods,fullInput,fullResponse) for mods in models]
     
-    if tracking:
-        bestFits.append(min([mods[2][0] for mods in paretoTournament(models)])) 
+    if tracking or returnTracking:
+        bestFits.append(min([mods[2][0] for mods in paretoTournament(models)]))
+        if returnTracking:
+            return models, bestFits
         plt.figure()
         plt.plot(bestFits)
         plt.title("Fitness over Time")
@@ -1235,6 +1237,47 @@ def runEpochs(x,y,epochs=5,**kwargs):
         models+=evolve(x,y,**kwargs)
 
     return sortModels(models)
+
+
+############################
+#Parallelization
+############################
+from joblib import Parallel, delayed
+def parallelEvolve(*args,n_jobs=-1,avail_cores=-1, **kwargs):
+    if avail_cores==-1:
+        try:
+            avail_cores=len(os.sched_getaffinity(0))
+        except:
+            avail_cores=os.cpu_count()
+    if n_jobs==-1:
+        try:
+            n_jobs=len(os.sched_getaffinity(0))
+        except:
+            n_jobs=os.cpu_count()
+
+    if "tracking" in kwargs and kwargs["tracking"]:
+        kwargs["returnTracking"]=True
+
+    print(f"Running parallel evolution with {n_jobs} jobs.")
+    if "liveTracking" in kwargs:
+        print("Live tracking is not supported in parallel evolution, disabling live tracking.")
+        kwargs["liveTracking"]=False
+        
+    runs = Parallel(n_jobs=avail_cores, backend="loky")(delayed(evolve)(*args, **kwargs) for _ in range(n_jobs))
+    if ("tracking" in kwargs and kwargs["tracking"]):
+        runs, tracking = zip(*runs)
+        # plot tracking for each job
+        plt.figure(figsize=(12, 6))
+        for i, track in enumerate(tracking):
+            plt.plot(track, label=f'Job {i+1}')
+        plt.title('Best Fitness Over Generations for Each Parallel Run')
+        plt.xlabel('Generations')
+        plt.ylabel('Best Fitness')
+        if n_jobs <= 16:  # Only show legend if there are a reasonable number of jobs
+            plt.legend()
+        plt.show()
+    flat = [model for sublist in runs for model in sublist]
+    return sortModels(flat)
 
 
 ############################
