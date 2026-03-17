@@ -207,6 +207,10 @@ def generateRandomModel(variables,ops,const,maxLength):  #Generates a random GP 
     prog[0]=np.array(np.random.choice(ops,random.randint(1,maxLength)),dtype=object) #Choose random operators
     countVars=modelArity(prog)    #Count how many variables/constants are needed
     prog[1]=np.random.choice(varChoices,countVars)       #Choose random variables/constants
+    # if all vars are constants then replace one random term
+    if all(t in const for t in prog[1]):
+        replace_idx = random.randrange(countVars)
+        prog[1][replace_idx] = random.choice(varChoices[:variables]) #Replace with a variable
     prog[1]=[i() if (callable(i) and i.__name__!='<lambda>' )else i for i in prog[1]] #If function then evaluate
     return prog
 generateRandomModel.__doc__ = "generateRandomModel() takes as input the variables, operators, constants, and max program length and returns a random program"
@@ -1259,7 +1263,7 @@ def parallelEvolve(*args,n_jobs=-1,avail_cores=-1, **kwargs):
         kwargs["returnTracking"]=True
 
     print(f"Running parallel evolution with {n_jobs} jobs.")
-    if "liveTracking" in kwargs:
+    if "liveTracking" in kwargs and kwargs["liveTracking"]:
         print("Live tracking is not supported in parallel evolution, disabling live tracking.")
         kwargs["liveTracking"]=False
         
