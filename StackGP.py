@@ -162,7 +162,7 @@ def ordinalBalancedSample(x,y,generation=100,generations=100):
 
 def balancedSample(x,y, *args, **kwargs):
     n=int(np.ceil(len(y)**(3/5)))
-    numBins=max(n,3)
+    numBins=max(round(n**(2/5)),3)
     bins=np.linspace(min(y),max(y),numBins+1)
     binIdx=np.digitize(y,bins)-1
     samplesPerBin=max(int(n/numBins),1)
@@ -694,6 +694,11 @@ def alignGPModel(model, data, response): #Aligns a model
         return model
     if np.isnan(np.array(prediction)).any() or np.isnan(np.array(response)).any() or not np.isfinite(np.array(prediction,dtype=np.float32)).all():
         return model
+    # Variance guards
+    if np.std(prediction) < 1e-12:
+        return model
+    if np.ptp(prediction) < 1e-12:
+        return model
     try:
         align=np.polyfit(prediction,response,1,rcond=1e-16)#np.round(np.polyfit(prediction,response,1,rcond=1e-16),decimals=14)
     except np.linalg.LinAlgError:
@@ -702,7 +707,7 @@ def alignGPModel(model, data, response): #Aligns a model
     newModel=trimModel(model)
     newModel[0]=np.array(newModel[0].tolist()+[mult,add],dtype=object)
     newModel[1]=newModel[1]+align.tolist()
-    setModelQuality(newModel,data,response)
+    #setModelQuality(newModel,data,response)
     return newModel
 alignGPModel.__doc__ = "alignGPModel(model, input, response) aligns a model such that response-a*f(x)+b are minimized over a and b"
 def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=defaultConst(), variableNames=[], mutationRate=79, crossoverRate=11, spawnRate=10, extinction=False,extinctionRate=10,elitismRate=10,popSize=300,maxComplexity=100,align=True,initialPop=[],timeLimit=300,capTime=False,tourneySize=5,tracking=False,returnTracking=False,liveTracking=False,liveTrackingInterval=1,modelEvaluationMetrics=[fitness,stackGPModelComplexity],dataSubsample=False,samplingMethod=randomSubsample,alternateObjectives=[],alternateObjFrequency=10,allowEarlyTermination=False,earlyTerminationThreshold=0):
@@ -792,6 +797,8 @@ def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=def
     models=sortModels(models)
     if align:
         models=[alignGPModel(mods,fullInput,fullResponse) for mods in models]
+        for mods in models:
+            setModelQuality(mods,fullInput,fullResponse,modelEvaluationMetrics=modelEvaluationMetrics+alternateObjectives)
     
     if tracking or returnTracking:
         bestFits.append(min([mods[2][0] for mods in paretoTournament(models)]))
@@ -1014,6 +1021,10 @@ def activeLearning(func, dims, ranges,rangesP,eqNum=1,version=1,iterations=100):
 
 def plotModels(models, modelExpression=False):
     tMods=copy.deepcopy(models)
+    if len(tMods[0][2])<2:
+        # add complexity as second value
+        for mod in tMods:
+            mod[2]=[mod[2][0],stackGPModelComplexity(mod)]
     [modelToListForm(mod) for mod in tMods]
     paretoModels=paretoTournament(tMods)
     for i in paretoModels:
