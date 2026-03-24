@@ -712,7 +712,19 @@ def alignGPModel(model, data, response): #Aligns a model
 alignGPModel.__doc__ = "alignGPModel(model, input, response) aligns a model such that response-a*f(x)+b are minimized over a and b"
 def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=defaultConst(), variableNames=[], mutationRate=79, crossoverRate=11, spawnRate=10, extinction=False,extinctionRate=10,elitismRate=10,popSize=300,maxComplexity=100,align=True,initialPop=[],timeLimit=300,capTime=False,tourneySize=5,tracking=False,returnTracking=False,liveTracking=False,liveTrackingInterval=1,modelEvaluationMetrics=[fitness,stackGPModelComplexity],dataSubsample=False,samplingMethod=randomSubsample,alternateObjectives=[],alternateObjFrequency=10,allowEarlyTermination=False,earlyTerminationThreshold=0):
     
-    metrics=modelEvaluationMetrics
+    alternatingFlag = False
+    if callable(modelEvaluationMetrics):
+        metrics=[modelEvaluationMetrics]
+        allMetrics=[modelEvaluationMetrics]+alternateObjectives
+    elif isinstance(modelEvaluationMetrics, list) and callable(modelEvaluationMetrics[0]):
+        metrics=modelEvaluationMetrics
+        allMetrics=modelEvaluationMetrics+alternateObjectives
+    elif isinstance(modelEvaluationMetrics, list) and isinstance(modelEvaluationMetrics[0], list):
+        metrics=modelEvaluationMetrics[0]
+        allMetrics=[item for sublist in modelEvaluationMetrics for item in sublist]+alternateObjectives
+        alternatingFlag = True
+    else:
+        raise ValueError("modelEvaluationMetrics must be a function, list of functions, or a list of lists of functions")
 
     fullInput,fullResponse=copy.deepcopy(inputData),copy.deepcopy(responseData)
     inData=copy.deepcopy(fullInput)
@@ -731,7 +743,10 @@ def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=def
         if len(alternateObjectives)>0 and (i+1)%alternateObjFrequency==0:
             metrics=modelEvaluationMetrics[:1]+alternateObjectives
         else:
-            metrics=modelEvaluationMetrics
+            if alternatingFlag:
+                metrics=modelEvaluationMetrics[i%len(modelEvaluationMetrics)]
+            else:
+                metrics=modelEvaluationMetrics
         if dataSubsample:
             inData,resData=samplingMethod(fullInput,fullResponse,generations=generations,generation=i)
         for mods in models:
@@ -790,7 +805,7 @@ def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=def
         
     
     for mods in models:
-        setModelQuality(mods,fullInput,fullResponse,modelEvaluationMetrics=modelEvaluationMetrics+alternateObjectives)
+        setModelQuality(mods,fullInput,fullResponse,modelEvaluationMetrics=allMetrics)
     models=[trimModel(mod) for mod in models]
     models=deleteDuplicateModels(models)
     models=removeIndeterminateModels(models)
@@ -798,7 +813,7 @@ def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=def
     if align:
         models=[alignGPModel(mods,fullInput,fullResponse) for mods in models]
         for mods in models:
-            setModelQuality(mods,fullInput,fullResponse,modelEvaluationMetrics=modelEvaluationMetrics+alternateObjectives)
+            setModelQuality(mods,fullInput,fullResponse,modelEvaluationMetrics=allMetrics)
     
     if tracking or returnTracking:
         bestFits.append(min([mods[2][0] for mods in paretoTournament(models)]))
