@@ -17,7 +17,7 @@ import time
 import dill
 import os
 from sklearn.cluster import KMeans #for clustering in ensemble definition
-from scipy.optimize import minimize #for uncertainty maximization
+from scipy.optimize import minimize, differential_evolution #for uncertainty maximization
 from sympy import symbols, simplify, expand
 import sympy as sym
 try:
@@ -710,6 +710,32 @@ def alignGPModel(model, data, response): #Aligns a model
     #setModelQuality(newModel,data,response)
     return newModel
 alignGPModel.__doc__ = "alignGPModel(model, input, response) aligns a model such that response-a*f(x)+b are minimized over a and b"
+
+def replaceEvaluate(model, newVec, inputData, responseData):
+    modelCopy = copy.deepcopy(model)
+    indices = get_numeric_indices(model[1])
+    for i in range(len(indices)):
+        modelCopy[1][indices[i]] = newVec[i]
+    value = rmse(modelCopy, inputData, responseData)
+    # if nan return infinity to avoid it being selected as the best solution
+    if np.isnan(value):
+        return np.inf
+    return value
+
+def optimizeModel(model, inputData, responseData, bounds=None, **kwargs):
+    indices = get_numeric_indices(model[1])
+    startingVals = [model[1][i] for i in indices]
+    fnc = lambda x: replaceEvaluate(model, x, inputData, responseData)
+    if bounds is None:
+        bounds = [np.sort((-10*val, 10*val)) for val in startingVals]
+    out = differential_evolution(fnc, bounds=bounds, x0=startingVals, **kwargs)
+    newModel = copy.deepcopy(model)
+    for i in range(len(indices)):
+        newModel[1][indices[i]] = out.x.tolist()[i]
+    setModelQuality(newModel, inputData, responseData)
+    return newModel
+
+
 def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=defaultConst(), variableNames=[], mutationRate=79, crossoverRate=11, spawnRate=10, extinction=False,extinctionRate=10,elitismRate=10,popSize=300,maxComplexity=100,align=True,initialPop=[],timeLimit=300,capTime=False,tourneySize=5,tracking=False,returnTracking=False,liveTracking=False,liveTrackingInterval=1,modelEvaluationMetrics=[fitness,stackGPModelComplexity],dataSubsample=False,samplingMethod=randomSubsample,alternateObjectives=[],alternateObjFrequency=10,allowEarlyTermination=False,earlyTerminationThreshold=0):
     
     alternatingFlag = False
@@ -1273,7 +1299,9 @@ def runEpochs(x,y,epochs=5,**kwargs):
 #Parallelization
 ############################
 from joblib import Parallel, delayed
-def parallelEvolve(*args,n_jobs=-1,avail_cores=-1, **kwargs):
+def parallelEvolve(*args,n_jobs=-1,avail_cores=-1, cascades=False, cascadeCount=10, exchangeCount=5, **kwargs):
+    capTime = False
+    liveTracking = False
     if avail_cores==-1:
         try:
             avail_cores=len(os.sched_getaffinity(0))
@@ -1284,28 +1312,86 @@ def parallelEvolve(*args,n_jobs=-1,avail_cores=-1, **kwargs):
             n_jobs=len(os.sched_getaffinity(0))
         except:
             n_jobs=os.cpu_count()
-
+    bestFits = [[] for _ in range(n_jobs)]
+    if "liveTracking" in kwargs and kwargs["liveTracking"]:
+        liveTracking = True
     if "tracking" in kwargs and kwargs["tracking"]:
         kwargs["returnTracking"]=True
+        
 
     print(f"Running parallel evolution with {n_jobs} jobs.")
-    if "liveTracking" in kwargs and kwargs["liveTracking"]:
-        print("Live tracking is not supported in parallel evolution, disabling live tracking.")
+    if "liveTracking" in kwargs and kwargs["liveTracking"] and cascades==False:
+        print("Live tracking is not supported in parallel evolution without cascades, disabling live tracking.")
         kwargs["liveTracking"]=False
-        
-    runs = Parallel(n_jobs=avail_cores, backend="loky")(delayed(evolve)(*args, **kwargs) for _ in range(n_jobs))
-    if ("tracking" in kwargs and kwargs["tracking"]):
-        runs, tracking = zip(*runs)
-        # plot tracking for each job
-        plt.figure(figsize=(12, 6))
-        for i, track in enumerate(tracking):
-            plt.plot(track, label=f'Job {i+1}')
-        plt.title('Best Fitness Over Generations for Each Parallel Run')
-        plt.xlabel('Generations')
-        plt.ylabel('Best Fitness')
-        if n_jobs <= 16:  # Only show legend if there are a reasonable number of jobs
-            plt.legend()
-        plt.show()
+
+    if cascades:
+        if "capTime" in kwargs and kwargs["capTime"]:
+            startTime = time.perf_counter()
+            capTime = True
+        if liveTracking:
+                fig, ax = plt.subplots(figsize=(20,10))
+                kwargs["returnTracking"]=True
+        argList = [copy.deepcopy(kwargs) for _ in range(n_jobs)]
+        for i in range(n_jobs):
+            argList[i]["tracking"]=False
+            argList[i]["liveTracking"]=False
+        for cs in range(cascadeCount):
+            #print(f"Starting cascade {cs+1}/{cascadeCount}")
+            if cs==0:
+                runs = Parallel(n_jobs=avail_cores, backend="loky")(delayed(evolve)(*args, **argList[1]) for _ in range(n_jobs))
+            else:
+                for i in range(n_jobs):
+                    exchangeOrder = random.sample(range(n_jobs), n_jobs)
+                    argList[i]["initialPop"]=runs[i]+copy.deepcopy(random.sample(runs[exchangeOrder[i]], min(exchangeCount, len(runs[exchangeOrder[i]]))))
+                runs = Parallel(n_jobs=avail_cores, backend="loky")(delayed(evolve)(*args, **argList[i]) for i in range(n_jobs))
+            if liveTracking or ("returnTracking" in kwargs and kwargs["returnTracking"]): 
+                runs, tracking = zip(*runs)
+                for i in range(n_jobs):
+                    bestFits[i].extend(tracking[i])
+                if liveTracking:
+                    ax.clear()
+                    for i in range(n_jobs):
+                        ax.plot(bestFits[i], label=f'Run {i+1}')
+                    ax.set_title(f"Best Model: {min([bst[-1] for bst in bestFits]):.2f} at Cascade {(cs+1)}")
+                    ax.set_xlabel("Generations")
+                    ax.set_ylabel("Fitness")
+                    if n_jobs <= 16:  # Only show legend if there are a reasonable number of jobs
+                        ax.legend()
+                    clear_output(wait=True) 
+                    display(fig)       
+                    plt.close(fig)
+            if capTime: 
+                for i in range(n_jobs):
+                    argList[i]["timeLimit"]=kwargs["timeLimit"]-(time.perf_counter()-startTime)
+                if kwargs["timeLimit"]-(time.perf_counter()-startTime)  <= 0:
+                    break 
+        if "returnTracking" in kwargs and kwargs["returnTracking"]:
+            if liveTracking:
+                clear_output(wait=True)
+            plt.figure(figsize=(12, 6))
+            for i in range(n_jobs):
+                plt.plot(bestFits[i], label=f'Job {i+1}')
+            plt.title('Best Fitness Over Generations for Each Parallel Run')
+            plt.xlabel('Generations')
+            plt.ylabel('Best Fitness')
+            if n_jobs <= 16:  # Only show legend if there are a reasonable number of jobs
+                plt.legend()
+            plt.show()
+
+    else:    
+        runs = Parallel(n_jobs=avail_cores, backend="loky")(delayed(evolve)(*args, **kwargs) for _ in range(n_jobs))
+        if ("tracking" in kwargs and kwargs["tracking"]):
+            runs, tracking = zip(*runs)
+            # plot tracking for each job
+            plt.figure(figsize=(12, 6))
+            for i, track in enumerate(tracking):
+                plt.plot(track, label=f'Job {i+1}')
+            plt.title('Best Fitness Over Generations for Each Parallel Run')
+            plt.xlabel('Generations')
+            plt.ylabel('Best Fitness')
+            if n_jobs <= 16:  # Only show legend if there are a reasonable number of jobs
+                plt.legend()
+            plt.show()
     flat = [model for sublist in runs for model in sublist]
     return sortModels(flat)
 
