@@ -1399,8 +1399,10 @@ def parallelEvolve(*args,n_jobs=-1,avail_cores=-1, cascades=False, cascadeCount=
 ############################
 #Benchmarking
 ############################
-def generateRandomBenchmark(numVars=5, numSamples=100, noiseLevel=0, opsChoices=defaultOps(), constChoices=defaultConst(), maxLength=10):
-
+def generateRandomBenchmark(numVars=5, numSamples=100, noiseLevel=0, opsChoices=defaultOps(), constChoices=defaultConst(), maxLength=10, seed=None):
+    if seed is not None:
+        np.random.seed(seed)
+        random.seed(seed)
     # Generate random input data
     inputData = np.random.rand(numVars, numSamples)
 
