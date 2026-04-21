@@ -254,7 +254,7 @@ def evModHelper(varStack,opStack,tempStack,data): #Iterative helper function for
     stack3=list(reversed(tempStack))
 
     if len(op_list)==0:
-        return [list(tempStack),[],list(varStack)]
+        return [list(reversed(stack3)),[],var_list]
 
     var_idx=0
     for op in op_list:
@@ -263,7 +263,8 @@ def evModHelper(varStack,opStack,tempStack,data): #Iterative helper function for
             while patt>len(stack3):
                 stack3.append(var_list[var_idx])
                 var_idx+=1
-            # stack3[-patt:] is [bottom..top], matching reverseList(stack3[:patt]) in the original
+            # stack3[-patt:] is [bottom..top]; the original used reverseList(stack3_orig[:patt])
+            # which reversed a top-at-front slice to the same [bottom..top] order, so args match
             args=varReplace(stack3[-patt:],data)
             del stack3[-patt:]
             try:
