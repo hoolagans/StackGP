@@ -241,45 +241,47 @@ def varCount(data): #Returns the number of variables in a data set
     return len(data)
 varCount.__doc__ = "varCount(data) determines the number of variables in a data set"
 def evaluateGPModel(model,inputData): #Evaluates a model numerically
-    response=evModHelper(model[1],model[0],[],np.array(inputData).astype(float))[2][0]
-    if not type(response)==np.ndarray and inputLen(inputData)>1:
-        response=np.array([response for i in range(inputLen(inputData))])
+    data=np.array(inputData).astype(float)
+    response=evModHelper(model[1],model[0],[],data)[2][0]
+    if not isinstance(response,np.ndarray) and inputLen(inputData)>1:
+        response=np.full(inputLen(inputData),response,dtype=float)
     return response
 evaluateGPModel.__doc__ = "evaluateGPModel(model,data) numerically evaluates a model using the data stored in inputData"
-def evModHelper(varStack,opStack,tempStack,data): #Recursive helper function for evaluateGPModel
-    stack1=varStack
-    stack2=opStack
-    stack3=tempStack
-    
-    if len(stack2)==0:
-        return [stack3,stack2,stack1]
-    op=stack2[0]
-    stack2=stack2[1:]
-    
-    if callable(op):
-        
-        patt=getArity(op)
-        while patt>len(stack3):
-            stack3=[stack1[0]]+stack3
-            stack1=stack1[1:]
-        try:
-            temp=op(*varReplace(reverseList(stack3[:patt]),data))
-        except TypeError:
-            print("stack3: ", stack3, " patt: ", patt, " data: ", data)
-            temp=np.nan
-        except OverflowError:
-            temp=np.nan
-        stack3=stack3[patt:]
-        stack3=[temp]+stack3
-        
-    else:
-        if len(stack1)>0:
-            stack3=varReplace([stack1[0]],data)+stack3
-            stack1=stack1[1:]
-    if len(stack2)>0:
-        stack1,stack2,stack3=evModHelper(stack1,stack2,stack3,data)
-        
-    return [stack1,stack2,stack3]
+def evModHelper(varStack,opStack,tempStack,data): #Iterative helper function for evaluateGPModel
+    var_list=list(varStack)
+    op_list=list(opStack)
+    # Represent tempStack with the top at the end for O(1) push/pop
+    stack3=list(reversed(tempStack))
+
+    if len(op_list)==0:
+        return [list(tempStack),[],list(varStack)]
+
+    var_idx=0
+    for op in op_list:
+        if callable(op):
+            patt=getArity(op)
+            while patt>len(stack3):
+                stack3.append(var_list[var_idx])
+                var_idx+=1
+            # stack3[-patt:] is [bottom..top], matching reverseList(stack3[:patt]) in the original
+            args=varReplace(stack3[-patt:],data)
+            del stack3[-patt:]
+            try:
+                temp=op(*args)
+            except TypeError:
+                print("stack3: ",list(reversed(stack3))," patt: ",patt," data: ",data)
+                temp=np.nan
+            except OverflowError:
+                temp=np.nan
+            stack3.append(temp)
+        else:
+            if var_idx<len(var_list):
+                stack3.append(varReplace([var_list[var_idx]],data)[0])
+                var_idx+=1
+
+    remaining_vars=var_list[var_idx:]
+    result_stack=list(reversed(stack3))
+    return [remaining_vars,[],result_stack]
 evModHelper.__doc__ = "evModHelper(varStack,opStack,tempStack,data) is a helper function for evaluateGPModel"
 def rmse(model, inputData, response):
     predictions = evaluateGPModel(model, inputData)
