@@ -8,7 +8,7 @@ import math
 import copy
 import sys
 from scipy.stats import pearsonr # for computing correlation
-from functools import reduce #for flattening lists
+from functools import reduce, cache #for flattening lists and caching
 from operator import concat  #for flattening lists
 from scipy.stats import trim_mean # for ensemble evaluation
 from scipy.stats import differential_entropy
@@ -175,6 +175,7 @@ def balancedSample(x,y, *args, **kwargs):
     return np.array([i[idx] for i in x]),y[idx]
 
 import inspect
+@cache
 def getArity(func): #Returns the arity of a function: used for model evaluations
     if func=="pop":
         return 1
