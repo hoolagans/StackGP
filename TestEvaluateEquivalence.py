@@ -114,7 +114,8 @@ def run_equivalence_test(
     for seed in seeds:
         np.random.seed(seed)
         random.seed(seed)
-        # Use fresh random data for each seed
+        # Fresh data for every seed so the test covers a diverse range of
+        # input values, not just a single fixed dataset.
         x = np.array([np.random.normal(0, 2, 100) for _ in range(num_variables)])
 
         for ops_name, ops in ops_configs.items():
@@ -153,8 +154,11 @@ def run_equivalence_test(
                     # Original recursive version may hit Python's recursion limit
                     # for very deep models; skip those cases.
                     total_skipped += 1
-                except Exception:
+                except Exception as exc:  # noqa: BLE001
+                    # Skip individual models that raise unexpected errors
+                    # (e.g. invalid domain for trig functions on symbolic data).
                     total_skipped += 1
+                    _ = exc  # suppress "assigned but never used" warnings
 
     if verbose:
         print(

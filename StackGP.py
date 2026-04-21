@@ -269,10 +269,7 @@ def evModHelper(varStack,opStack,tempStack,data): #Iterative helper function for
             del stack3[-patt:]
             try:
                 temp=op(*args)
-            except TypeError:
-                print("stack3: ",list(reversed(stack3))," patt: ",patt," data: ",data)
-                temp=np.nan
-            except OverflowError:
+            except (TypeError, OverflowError):
                 temp=np.nan
             stack3.append(temp)
         else:
