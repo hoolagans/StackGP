@@ -24,28 +24,28 @@ import StackGP as sgp
 # Helpers shared across test cases
 # ---------------------------------------------------------------------------
 
-def _simple_model():
+def simple_model():
     """Return a simple, deterministic model:  add(x0, x1)  →  x0 + x1."""
     ops = np.array([sgp.add], dtype=object)
     var = [sgp.variableSelect(0), sgp.variableSelect(1)]
     return [ops, var, []]
 
 
-def _constant_model(c=5.0):
+def constant_model(c=5.0):
     """Return a model that always returns constant c:  pop  →  c."""
     ops = np.array(["pop"], dtype=object)
     var = [c]
     return [ops, var, []]
 
 
-def _linear_model():
+def linear_model():
     """Return a model: mult(x0, 2.0)  →  2*x0."""
     ops = np.array([sgp.mult], dtype=object)
     var = [sgp.variableSelect(0), 2.0]
     return [ops, var, []]
 
 
-def _set_quality(model, x, y, metrics=None):
+def set_quality(model, x, y, metrics=None):
     if metrics is None:
         metrics = [sgp.fitness, sgp.stackGPModelComplexity]
     sgp.setModelQuality(model, x, y, metrics)
@@ -290,11 +290,11 @@ class TestModelStructureHelpers(unittest.TestCase):
         self.assertEqual(sgp.getArity("pop"), 1)
 
     def test_modelArity_add(self):
-        model = _simple_model()
+        model = simple_model()
         self.assertEqual(sgp.modelArity(model), 2)
 
     def test_modelArity_pop(self):
-        model = _constant_model()
+        model = constant_model()
         self.assertEqual(sgp.modelArity(model), 1)
 
     def test_listArity_empty(self):
@@ -304,8 +304,8 @@ class TestModelStructureHelpers(unittest.TestCase):
         self.assertEqual(sgp.listArity([sgp.add]), 2)
 
     def test_listArity_two_unary(self):
-        # each unary contributes 1 var consumed, net is still 1 input per call
-        # listArity([neg, neg]) = 1 + (1-1) + (1-1) = 1
+        # Each neg is unary (arity 1): the chain neg(neg(x)) still requires exactly
+        # 1 input variable.  listArity formula: 1 + sum(arity-1) = 1 + 0 + 0 = 1.
         self.assertEqual(sgp.listArity([sgp.neg, sgp.neg]), 1)
 
     def test_buildEmptyModel(self):
@@ -416,39 +416,39 @@ class TestModelEvaluation(unittest.TestCase):
         self.y_linear = 2.0 * self.x[0]
 
     def test_evaluateGPModel_add(self):
-        model = _simple_model()
+        model = simple_model()
         result = sgp.evaluateGPModel(model, self.x)
         np.testing.assert_array_almost_equal(result, self.y_add)
 
     def test_evaluateGPModel_constant(self):
-        model = _constant_model(7.0)
+        model = constant_model(7.0)
         result = sgp.evaluateGPModel(model, self.x)
         np.testing.assert_array_almost_equal(result, [7.0, 7.0, 7.0])
 
     def test_evaluateGPModel_linear(self):
-        model = _linear_model()
+        model = linear_model()
         result = sgp.evaluateGPModel(model, self.x)
         np.testing.assert_array_almost_equal(result, self.y_linear)
 
     def test_rmse_perfect(self):
-        model = _simple_model()
+        model = simple_model()
         err = sgp.rmse(model, self.x, self.y_add)
         self.assertAlmostEqual(err, 0.0, places=10)
 
     def test_rmse_nonzero(self):
-        model = _simple_model()
+        model = simple_model()
         err = sgp.rmse(model, self.x, self.y_add + 1.0)
         self.assertAlmostEqual(err, 1.0, places=10)
 
     def test_fitness_perfect(self):
         """Perfect linear predictor should have fitness close to 0 (1-R^2)."""
-        model = _simple_model()
+        model = simple_model()
         fit = sgp.fitness(model, self.x, self.y_add)
         self.assertAlmostEqual(fit, 0.0, places=6)
 
-    def test_fitness_constant_model(self):
+    def test_fitnessconstant_model(self):
         """Constant model has no correlation with response → fitness = nan or 1."""
-        model = _constant_model(3.0)
+        model = constant_model(3.0)
         fit = sgp.fitness(model, self.x, self.y_add)
         # constant output produces nan fitness
         self.assertTrue(fit is None or math.isnan(fit) or fit == 1.0)
@@ -458,7 +458,7 @@ class TestModelEvaluation(unittest.TestCase):
         np.random.seed(1)
         x = np.random.rand(2, 50)
         y = x[0] + x[1] + 0.1 * np.random.randn(50)
-        model = _simple_model()
+        model = simple_model()
         fit = sgp.fitness(model, x, y)
         if not math.isnan(fit):
             self.assertGreaterEqual(fit, 0.0)
@@ -466,14 +466,14 @@ class TestModelEvaluation(unittest.TestCase):
 
     def test_binaryError_within_bounds(self):
         """binaryError should return a value in [0, 0.5]."""
-        model = _simple_model()
+        model = simple_model()
         response = np.array([1.0, 1.0, 1.0])
         err = sgp.binaryError(model, self.x, response)
         self.assertGreaterEqual(err, 0.0)
         self.assertLessEqual(err, 0.5)
 
     def test_stackGPModelComplexity(self):
-        model = _simple_model()
+        model = simple_model()
         c = sgp.stackGPModelComplexity(model)
         self.assertIsInstance(c, int)
         self.assertGreater(c, 0)
@@ -489,13 +489,13 @@ class TestModelEvaluation(unittest.TestCase):
         self.assertEqual(c, expected)
 
     def test_setModelQuality_sets_two_metrics(self):
-        model = _simple_model()
-        _set_quality(model, self.x, self.y_add)
+        model = simple_model()
+        set_quality(model, self.x, self.y_add)
         self.assertEqual(len(model[2]), 2)
 
     def test_setModelQuality_first_metric_is_fitness(self):
-        model = _simple_model()
-        _set_quality(model, self.x, self.y_add)
+        model = simple_model()
+        set_quality(model, self.x, self.y_add)
         self.assertAlmostEqual(model[2][0], 0.0, places=6)
 
 
@@ -563,7 +563,7 @@ class TestParetoSelection(unittest.TestCase):
         """Build a dummy population with given quality tuples."""
         pop = []
         for q in qualities:
-            m = copy.deepcopy(_simple_model())
+            m = copy.deepcopy(simple_model())
             m[2] = list(q)
             pop.append(m)
         return pop
@@ -581,8 +581,9 @@ class TestParetoSelection(unittest.TestCase):
         self.assertTrue(front[2])
 
     def test_paretoTournament_returns_front(self):
-        # (0.1,5), (0.3,3), (0.5,1): no point dominates another (lower is better
-        # in both dimensions for different points), so all three are on the front.
+        """With objectives [(0.1,5), (0.3,3), (0.5,1)], no single point dominates
+        another (lower is better on both axes for different points), so all three
+        are on the Pareto front."""
         pop = self._make_pop([(0.1, 5), (0.3, 3), (0.5, 1)])
         front = sgp.paretoTournament(pop)
         qualities = [m[2] for m in front]
@@ -618,35 +619,35 @@ class TestParetoSelection(unittest.TestCase):
 class TestModelComparison(unittest.TestCase):
 
     def test_modelSameQ_identical(self):
-        m = _simple_model()
+        m = simple_model()
         self.assertTrue(sgp.modelSameQ(m, copy.deepcopy(m)))
 
     def test_modelSameQ_different_ops(self):
-        m1 = _simple_model()
-        m2 = _linear_model()
+        m1 = simple_model()
+        m2 = linear_model()
         self.assertFalse(sgp.modelSameQ(m1, m2))
 
     def test_deleteDuplicateModels_removes_duplicates(self):
-        m = _simple_model()
+        m = simple_model()
         pop = [copy.deepcopy(m) for _ in range(5)]
         unique = sgp.deleteDuplicateModels(pop)
         self.assertEqual(len(unique), 1)
 
     def test_deleteDuplicateModels_preserves_distinct(self):
-        pop = [_simple_model(), _linear_model(), _constant_model()]
+        pop = [simple_model(), linear_model(), constant_model()]
         unique = sgp.deleteDuplicateModels(pop)
         self.assertEqual(len(unique), 3)
 
     def test_deleteDuplicateModelsPhenotype(self):
-        m = _simple_model()
+        m = simple_model()
         pop = [copy.deepcopy(m) for _ in range(3)]
         unique = sgp.deleteDuplicateModelsPhenotype(pop)
         self.assertEqual(len(unique), 1)
 
     def test_removeIndeterminateModels(self):
-        good = copy.deepcopy(_simple_model())
+        good = copy.deepcopy(simple_model())
         good[2] = [0.1, 2]
-        bad = copy.deepcopy(_simple_model())
+        bad = copy.deepcopy(simple_model())
         bad[2] = [float('nan'), 2]
         pop = [good, bad]
         cleaned = sgp.removeIndeterminateModels(pop)
@@ -656,7 +657,7 @@ class TestModelComparison(unittest.TestCase):
     def test_sortModels_ascending(self):
         pop = []
         for v in [0.5, 0.1, 0.3]:
-            m = copy.deepcopy(_simple_model())
+            m = copy.deepcopy(simple_model())
             m[2] = [v]
             pop.append(m)
         sorted_pop = sgp.sortModels(pop)
@@ -676,13 +677,13 @@ class TestModelAlignmentTrimming(unittest.TestCase):
         self.y = 3.0 * self.x[0] + 2.0 * self.x[1] + 1.0
 
     def test_trimModel_returns_valid(self):
-        model = _simple_model()
+        model = simple_model()
         trimmed = sgp.trimModel(model)
         self.assertEqual(len(trimmed), 3)
         self.assertEqual(len(trimmed[1]), sgp.modelArity(trimmed))
 
     def test_alignGPModel_returns_model(self):
-        model = _simple_model()
+        model = simple_model()
         aligned = sgp.alignGPModel(model, self.x, self.y)
         self.assertEqual(len(aligned), 3)
 
@@ -691,7 +692,7 @@ class TestModelAlignmentTrimming(unittest.TestCase):
         np.random.seed(42)
         x = np.random.rand(2, 50)
         y = 5.0 * x[0] + 3.0 * x[1]
-        model = _simple_model()
+        model = simple_model()
         aligned = sgp.alignGPModel(model, x, y)
         fit_before = sgp.fitness(model, x, y)
         fit_after = sgp.fitness(aligned, x, y)
@@ -700,7 +701,7 @@ class TestModelAlignmentTrimming(unittest.TestCase):
 
     def test_alignGPModel_constant_returns_unchanged(self):
         """Constant model cannot be aligned; should be returned as-is."""
-        model = _constant_model(3.0)
+        model = constant_model(3.0)
         aligned = sgp.alignGPModel(model, self.x, self.y)
         self.assertEqual(len(aligned), 3)
 
@@ -712,14 +713,14 @@ class TestModelAlignmentTrimming(unittest.TestCase):
 class TestPrintGPModel(unittest.TestCase):
 
     def test_printGPModel_returns_expr(self):
-        model = _simple_model()
+        model = simple_model()
         expr = sgp.printGPModel(model)
         # Should be a sympy expression (not nan)
         import sympy as sym
         self.assertNotEqual(expr, float('nan'))
 
     def test_printGPModel_add(self):
-        model = _simple_model()
+        model = simple_model()
         expr = sgp.printGPModel(model)
         import sympy as sym
         x0, x1 = sym.symbols('x0 x1')
@@ -781,7 +782,7 @@ class TestEnsembleFunctions(unittest.TestCase):
         for _ in range(n):
             m = sgp.generateRandomModel(2, sgp.defaultOps(), sgp.defaultConst(), 4)
             m = sgp.alignGPModel(m, self.x, self.y)
-            _set_quality(m, self.x, self.y)
+            set_quality(m, self.x, self.y)
             models.append(m)
         return models
 
@@ -818,7 +819,7 @@ class TestSharpness(unittest.TestCase):
         np.random.seed(6)
         self.x = np.random.rand(2, 40)
         self.y = self.x[0] + self.x[1]
-        self.model = sgp.alignGPModel(_simple_model(), self.x, self.y)
+        self.model = sgp.alignGPModel(simple_model(), self.x, self.y)
 
     def test_sharpnessConstants_nonnegative(self):
         val = sgp.sharpnessConstants(self.model, self.x, self.y)
@@ -1009,13 +1010,13 @@ class TestEdgeCases(unittest.TestCase):
 
     def test_evaluateGPModel_single_point(self):
         """Model should handle single-point input."""
-        model = _simple_model()
+        model = simple_model()
         x = np.array([[3.0], [4.0]])
         result = sgp.evaluateGPModel(model, x)
         self.assertAlmostEqual(float(result[0]), 7.0)
 
     def test_deleteDuplicateModels_single_model(self):
-        m = _simple_model()
+        m = simple_model()
         result = sgp.deleteDuplicateModels([m])
         self.assertEqual(len(result), 1)
 
