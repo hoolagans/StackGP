@@ -25,6 +25,7 @@ try:
 except:
     pass
 
+import pandas as pd
 import signal #for timing out functions
 from contextlib import contextmanager #for timing out functions
 
@@ -1250,6 +1251,58 @@ def plotOperatorPresence(models,sort=False,excludePop=True):
     plt.xlabel("Operator")
     plt.ylabel("Frequency")
     plt.show()
+
+############################
+#Model Summary Table
+############################
+
+def summarizeModels(models, inputData, response, variableNames=[]):
+    numVars = varCount(inputData)
+    defaultVarNames = ["x" + str(i) for i in range(numVars)]
+    symbolicVarNames = variableNames if len(variableNames) > 0 else defaultVarNames
+    symVars = symbols(symbolicVarNames)
+
+    tMods = copy.deepcopy(models)
+    [modelToListForm(mod) for mod in tMods]
+    paretoModels = paretoTournament(tMods)
+    [modelRestoreForm(mod) for mod in paretoModels]
+
+    rows = []
+    for mod in paretoModels:
+        expression = printGPModel(mod, symVars)
+
+        fit = fitness(mod, inputData, response)
+        r2 = round(1 - fit, 6) if np.isfinite(fit) else np.nan
+
+        model_rmse = rmse(mod, inputData, response)
+        model_rmse = round(float(model_rmse), 6) if np.isfinite(model_rmse) else np.nan
+
+        complexity = stackGPModelComplexity(mod)
+
+        varLabels = variableNames if len(variableNames) > 0 else defaultVarNames
+        replacedVars = varReplace(mod[1], varLabels)
+        usedVars = sorted(set(
+            v for v in replacedVars
+            if isinstance(v, str) and v in varLabels
+        ), key=lambda v: varLabels.index(v))
+
+        rows.append({
+            "Expression": str(expression),
+            "R²": r2,
+            "RMSE": model_rmse,
+            "Complexity": complexity,
+            "Variables": ", ".join(usedVars) if usedVars else "none",
+        })
+
+    df = pd.DataFrame(rows, columns=["Expression", "R²", "RMSE", "Complexity", "Variables"])
+    df.sort_values("Complexity", inplace=True, ignore_index=True)
+    return df
+
+summarizeModels.__doc__ = (
+    "summarizeModels(models, inputData, response, variableNames=[]) returns a pandas DataFrame "
+    "showing each Pareto-front model's symbolic expression, R², RMSE, complexity, and which "
+    "variables appear—making it easy to present results without manual post-processing."
+)
 
 ############################
 #Sharpness Computations
