@@ -796,6 +796,7 @@ def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=def
     elif isinstance(modelEvaluationMetrics, list) and isinstance(modelEvaluationMetrics[0], list):
         metrics=modelEvaluationMetrics[0]
         allMetrics=[item for sublist in modelEvaluationMetrics for item in sublist]+alternateObjectives
+        allMetrics = list(dict.fromkeys(allMetrics))  # Remove duplicates while preserving order
         alternatingFlag = True
     else:
         raise ValueError("modelEvaluationMetrics must be a function, list of functions, or a list of lists of functions")
