@@ -952,7 +952,8 @@ class TestModelCurvature(unittest.TestCase):
         np.random.seed(0)
         x_pos = np.abs(self.x) + 0.1   # exp needs positive inputs
 
-        # f(x) = x0  (identity, linear)
+        # f(x) = x0  ('pop' pushes a variable/constant onto the evaluation stack;
+        # used here as the identity — returns x0 unchanged, i.e. a linear model)
         ops_lin = np.array(["pop"], dtype=object)
         var_lin = [sgp.variableSelect(0)]
         lin_model = [ops_lin, var_lin, []]
@@ -967,6 +968,19 @@ class TestModelCurvature(unittest.TestCase):
 
         if not math.isnan(c_lin) and not math.isnan(c_exp):
             self.assertGreater(c_exp, c_lin)
+
+    def test_higher_dimensional_input(self):
+        """modelCurvature should handle inputs with more than 2 variables."""
+        np.random.seed(3)
+        # 5-variable input, 30 data points
+        x5 = np.random.rand(5, 30)
+        # Build a model that uses only x0 (sqrd); the other variables are ignored
+        ops = np.array([sgp.sqrd], dtype=object)
+        var = [sgp.variableSelect(0)]
+        model = [ops, var, []]
+        val = sgp.modelCurvature(model, x5)
+        if not math.isnan(val):
+            self.assertGreater(val, 0.0)
 
 
 # ---------------------------------------------------------------------------
