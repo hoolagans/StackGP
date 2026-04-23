@@ -25,6 +25,48 @@ def test(func, dimensions, ranges, numberOfPoints=100, numberOfTestsPoints=200):
     minerr=min(fitList[np.logical_not(np.isnan(fitList))])
     return minerr, fitList
 
+def parallelTest(func, dimensions, ranges, numberOfPoints=100, numberOfTestsPoints=200):
+    inputData=[]
+    testInput=[]
+    for i in range(dimensions):
+        inputData.append(np.random.uniform(ranges[i][0],ranges[i][1],numberOfPoints))
+        testInput.append(np.random.uniform(ranges[i][0],ranges[i][1],numberOfTestsPoints))
+    inputData=np.array(inputData)
+    testInput=np.array(testInput)
+    response=func(inputData)
+    testResponse=func(testInput)
+    errors=[]
+    models=[]
+    minerr=1
+    models=sgp.parallelEvolve(inputData,response,initialPop=models,generations=100,tracking=False,popSize=300,ops=sgp.allOps(),cascades=False,cascadeCount=10,timeLimit=120,capTime=True,align=False,elitismRate=10)
+    
+    models=sgp.selectModels(models,20)
+    alignedModels=[sgp.alignGPModel(mods,inputData,response) for mods in models]
+    fitList=np.array([sgp.fitness(mod,testInput,testResponse) for mod in alignedModels])
+    minerr=min(fitList[np.logical_not(np.isnan(fitList))])
+    return minerr, fitList
+
+def cascadesTest(func, dimensions, ranges, numberOfPoints=100, numberOfTestsPoints=200):
+    inputData=[]
+    testInput=[]
+    for i in range(dimensions):
+        inputData.append(np.random.uniform(ranges[i][0],ranges[i][1],numberOfPoints))
+        testInput.append(np.random.uniform(ranges[i][0],ranges[i][1],numberOfTestsPoints))
+    inputData=np.array(inputData)
+    testInput=np.array(testInput)
+    response=func(inputData)
+    testResponse=func(testInput)
+    errors=[]
+    models=[]
+    minerr=1
+    models=sgp.parallelEvolve(inputData,response,initialPop=models,generations=10,tracking=False,popSize=300,ops=sgp.allOps(),cascades=True,cascadeCount=10,timeLimit=120,capTime=True,align=False,elitismRate=10)
+    
+    models=sgp.selectModels(models,20)
+    alignedModels=[sgp.alignGPModel(mods,inputData,response) for mods in models]
+    fitList=np.array([sgp.fitness(mod,testInput,testResponse) for mod in alignedModels])
+    minerr=min(fitList[np.logical_not(np.isnan(fitList))])
+    return minerr, fitList
+
 #Speed Test
 def speedTest(func, dimensions, ranges, numberOfPoints=100, numberOfTestsPoints=200):
     inputData=[]
@@ -51,11 +93,26 @@ def batches(func, dimensions, ranges, numberOfPoints=100, numberOfTestPoints=200
         errs.append(err)
     return min(errs), np.median(errs), np.mean(errs), max(errs), np.std(errs)
 
+def parallelBatches(func, dimensions, ranges, numberOfPoints=100, numberOfTestPoints=200, repeats=10):
+    errs=[]
+    for i in range(repeats):
+        err,fit=parallelTest(func,dimensions,ranges,numberOfPoints,numberOfTestPoints)
+        errs.append(err)
+    return min(errs), np.median(errs), np.mean(errs), max(errs), np.std(errs)
+
+def cascadesBatches(func, dimensions, ranges, numberOfPoints=100, numberOfTestPoints=200, repeats=10):
+    errs=[]
+    for i in range(repeats):
+        err,fit=cascadesTest(func,dimensions,ranges,numberOfPoints,numberOfTestPoints)
+        errs.append(err)
+    return min(errs), np.median(errs), np.mean(errs), max(errs), np.std(errs)
+
 def speedBatch(func,dimension,ranges,numberOfPoints=100,numberOfTestPoints=200,repeats=10):
     times=[]
     for i in range(repeats):
         times.append(speedTest(func,dimension,ranges,numberOfPoints,numberOfTestPoints))
     return min(times), np.median(times), np.mean(times), max(times), np.std(times)
+
 
 
 minerrs=[]
@@ -126,6 +183,25 @@ print("Feynman EQ91")
 speed=speedBatch(f4,4,[[1,5],[1,5],[1,5],[1,5]],100,200)
 print("Time: "+str(speed))
 
+# Parallel Test 
+err=parallelBatches(f2,3,[[1,3],[1,3],[1,3]],100,200)
+minerrs.append(err[0])
+mederrs.append(err[1])
+meanerrs.append(err[2])
+maxerrs.append(err[3])
+std.append(err[4])
+print("Parallel Feynman EQ3")
+print("Error: "+str(err))
+
+# Cascades Test
+err=cascadesBatches(f2,3,[[1,3],[1,3],[1,3]],100,200)
+minerrs.append(err[0])
+mederrs.append(err[1])
+meanerrs.append(err[2])
+maxerrs.append(err[3])
+std.append(err[4])
+print("Cascades Feynman EQ3")
+print("Error: "+str(err))
 
 file=open("BenchmarkResults.txt","w+")
 file.write("Feynman EQ2\n")
@@ -164,6 +240,18 @@ file.write("Median Time: "+str(speed[1])+"\n")
 file.write("Mean Time: "+str(speed[2])+"\n")
 file.write("Max Time: "+str(speed[3])+"\n")
 file.write("Standard Deviation: "+str(speed[4])+"\n")
+file.write("Parallel Feynman EQ3\n")
+file.write("Min Error: "+str(minerrs[5])+"\n")
+file.write("Median Error: "+str(mederrs[5])+"\n")
+file.write("Mean Error: "+str(meanerrs[5])+"\n")
+file.write("Max Error: "+str(maxerrs[5])+"\n")
+file.write("Standard Deviation: "+str(std[5])+"\n")
+file.write("Cascades Feynman EQ3\n")
+file.write("Min Error: "+str(minerrs[6])+"\n")
+file.write("Median Error: "+str(mederrs[6])+"\n")
+file.write("Mean Error: "+str(meanerrs[6])+"\n")
+file.write("Max Error: "+str(maxerrs[6])+"\n")
+file.write("Standard Deviation: "+str(std[6])+"\n")
 file.close()
 
 

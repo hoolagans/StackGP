@@ -19,7 +19,7 @@ import dill
 import os
 from sklearn.cluster import KMeans #for clustering in ensemble definition
 from scipy.optimize import minimize, differential_evolution #for uncertainty maximization
-from sympy import symbols, simplify, expand
+from sympy import symbols, simplify, expand, lambdify
 import sympy as sym
 try:
     from IPython.display import display, clear_output
@@ -419,6 +419,52 @@ def basisFunctionComplexity(model,vars, values,*args):
 # Creates a lambda function to be used as a complexity metric when given a target dimensionality and deviation
 def basisFunctionComplexityDiff(target, deviation, vars, low, mid, high):
     return lambda model,*args: max(np.mean([abs(basisFunctionComplexity(model,vars,low)-target),abs(basisFunctionComplexity(model,vars,mid)-target) ,abs(basisFunctionComplexity(model,vars,high)-target)] ),(deviation))-deviation
+
+
+def modelCurvatureMax(model, inputData, *args, **kwargs):
+    """modelCurvatureSymbolic(model, inputData)
+    Computes the max model curvature over the input data points using the
+    max Frobenius norm of the symbolic Hessian of the model output.
+    This implements the model curvature complexity measure of Haut, Card, and
+    Kotanchek, which captures how 'bent' or nonlinear the model surface is.
+    The Frobenius norm of the Hessian at a point x is:
+        ||H(x)||_F = sqrt( sum_{j,k} (d^2f / dx_j dx_k)^2 )
+    """
+    numVars = inputData.shape[0]
+
+    max_curvature = 0.0
+
+    mat = ComputeSymbolicHess(model, numVars)
+    fro = mat.norm('fro')
+    syms = [symbols(str("x") + str(i)) for i in range(numVars)]
+    f = lambdify(syms, fro, 'numpy')
+    vals = f(*inputData)
+    max_curvature = np.max(vals)
+
+
+
+    return max_curvature
+
+def modelCurvature(model, inputData, *args, **kwargs):
+    """modelCurvatureSymbolic(model, inputData)
+    Computes the model curvature over the input data points using the
+    Frobenius norm of the symbolic Hessian of the model output.
+    This implements the model curvature complexity measure of Haut, Card, and
+    Kotanchek, which captures how 'bent' or nonlinear the model surface is.
+    The Frobenius norm of the Hessian at a point x is:
+        ||H(x)||_F = sqrt( sum_{j,k} (d^2f / dx_j dx_k)^2 )
+    """
+    numVars = inputData.shape[0]
+
+    mat = ComputeSymbolicHess(model, numVars)
+    fro = mat.norm('fro')
+    syms = [symbols(str("x") + str(i)) for i in range(numVars)]
+    f = lambdify(syms, fro, 'numpy')
+    vals = f(*inputData)
+
+
+
+    return vals
 
 
 def setModelQuality(model,inputData,response,modelEvaluationMetrics=[fitness,stackGPModelComplexity]):
