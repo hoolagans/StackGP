@@ -1690,6 +1690,7 @@ makeConstrainedFitness.__doc__ = ("makeConstrainedFitness(baseFitness, constrain
 ############################
 
 STACKGP_VERSION = "1.0"
+__version__ = STACKGP_VERSION
 
 
 def savePopulation(models, path, metadata=None):
@@ -1807,7 +1808,12 @@ try:
             return str(printGPModel(self.best_model_))
 
 except ImportError:
-    pass
+    warnings.warn(
+        "scikit-learn is not installed; StackGPRegressor is unavailable. "
+        "Install with: pip install scikit-learn",
+        ImportWarning,
+        stacklevel=1,
+    )
 
 
 ############################
