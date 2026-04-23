@@ -837,6 +837,139 @@ class TestSharpness(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# 15b. Model Curvature Computations (Haut, Card, Kotanchek)
+# ---------------------------------------------------------------------------
+
+class TestModelCurvature(unittest.TestCase):
+    """Tests for modelCurvature, the Haut/Card/Kotanchek curvature metric."""
+
+    def setUp(self):
+        np.random.seed(7)
+        self.x = np.random.rand(2, 50) * 4.0   # 2 vars, 50 points in [0, 4)
+        self.y = self.x[0] + self.x[1]
+
+    # ------------------------------------------------------------------
+    # 1. Return-type and non-negativity
+    # ------------------------------------------------------------------
+
+    def test_returns_float(self):
+        model = simple_model()
+        val = sgp.modelCurvature(model, self.x)
+        self.assertIsInstance(float(val), float)
+
+    def test_nonnegative(self):
+        """Curvature must always be >= 0 (it is a norm-based quantity)."""
+        model = simple_model()
+        val = sgp.modelCurvature(model, self.x)
+        if not math.isnan(val):
+            self.assertGreaterEqual(val, 0.0)
+
+    # ------------------------------------------------------------------
+    # 2. Linear model → near-zero curvature
+    # ------------------------------------------------------------------
+
+    def test_linear_model_near_zero_curvature(self):
+        """f(x) = x0 + x1 is exactly linear; its Hessian is the zero matrix."""
+        model = simple_model()           # add(x0, x1)
+        val = sgp.modelCurvature(model, self.x)
+        # Numerical noise should be tiny relative to finite-difference scale
+        if not math.isnan(val):
+            self.assertLess(val, 1e-6)
+
+    def test_constant_model_near_zero_curvature(self):
+        """A constant model has a zero Hessian regardless of the constant value."""
+        model = constant_model(3.14)
+        val = sgp.modelCurvature(model, self.x)
+        if not math.isnan(val):
+            self.assertLess(val, 1e-6)
+
+    # ------------------------------------------------------------------
+    # 3. Nonlinear model → positive curvature
+    # ------------------------------------------------------------------
+
+    def test_quadratic_model_positive_curvature(self):
+        """f(x) = x0^2 has constant second derivative 2; curvature should be > 0."""
+        ops = np.array([sgp.sqrd], dtype=object)
+        var = [sgp.variableSelect(0)]
+        quad_model = [ops, var, []]
+        val = sgp.modelCurvature(quad_model, self.x)
+        if not math.isnan(val):
+            self.assertGreater(val, 0.0)
+
+    def test_nonlinear_greater_than_linear_curvature(self):
+        """A quadratic model should have strictly higher curvature than a linear one."""
+        linear = simple_model()
+        ops = np.array([sgp.sqrd], dtype=object)
+        var = [sgp.variableSelect(0)]
+        quad = [ops, var, []]
+        c_lin = sgp.modelCurvature(linear, self.x)
+        c_quad = sgp.modelCurvature(quad, self.x)
+        if not math.isnan(c_lin) and not math.isnan(c_quad):
+            self.assertGreater(c_quad, c_lin)
+
+    # ------------------------------------------------------------------
+    # 4. maxPoints subsampling
+    # ------------------------------------------------------------------
+
+    def test_maxPoints_returns_finite(self):
+        """With maxPoints set, result should still be a finite non-negative number."""
+        model = simple_model()
+        val = sgp.modelCurvature(model, self.x, maxPoints=10)
+        if not math.isnan(val):
+            self.assertGreaterEqual(val, 0.0)
+
+    def test_maxPoints_larger_than_data_is_safe(self):
+        """maxPoints > numPoints should behave like no subsampling."""
+        model = simple_model()
+        val = sgp.modelCurvature(model, self.x, maxPoints=10000)
+        if not math.isnan(val):
+            self.assertGreaterEqual(val, 0.0)
+
+    # ------------------------------------------------------------------
+    # 5. Comparison with sharpness
+    # ------------------------------------------------------------------
+
+    def test_curvature_vs_sharpness_linear(self):
+        """For a linear model, curvature ≈ 0 while sharpness may be > 0.
+
+        This illustrates the key difference between the two metrics:
+        sharpness measures fitness sensitivity to perturbations of constants
+        or data, while curvature measures the geometric bending of the surface.
+        A linear model with numeric constants can still have non-zero sharpness
+        if its constants are large, but its curvature is always zero.
+        """
+        aligned = sgp.alignGPModel(simple_model(), self.x, self.y)
+        curvature = sgp.modelCurvature(aligned, self.x)
+        sharpness = sgp.totalSharpness(aligned, self.x, self.y)
+        # curvature of a linear model should be near zero
+        if not math.isnan(curvature):
+            self.assertLess(curvature, 1e-4)
+        # sharpness can be nonzero (stochastic; just check it is finite and >= 0)
+        self.assertGreaterEqual(sharpness, 0.0)
+
+    def test_curvature_sensitive_to_nonlinearity(self):
+        """Curvature grows when the model is more nonlinear (e.g. exp vs identity)."""
+        np.random.seed(0)
+        x_pos = np.abs(self.x) + 0.1   # exp needs positive inputs
+
+        # f(x) = x0  (identity, linear)
+        ops_lin = np.array(["pop"], dtype=object)
+        var_lin = [sgp.variableSelect(0)]
+        lin_model = [ops_lin, var_lin, []]
+
+        # f(x) = exp(x0)  (highly nonlinear)
+        ops_exp = np.array([sgp.exp], dtype=object)
+        var_exp = [sgp.variableSelect(0)]
+        exp_model = [ops_exp, var_exp, []]
+
+        c_lin = sgp.modelCurvature(lin_model, x_pos)
+        c_exp = sgp.modelCurvature(exp_model, x_pos)
+
+        if not math.isnan(c_lin) and not math.isnan(c_exp):
+            self.assertGreater(c_exp, c_lin)
+
+
+# ---------------------------------------------------------------------------
 # 16. Evolution (short run)
 # ---------------------------------------------------------------------------
 

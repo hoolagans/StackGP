@@ -1339,6 +1339,90 @@ def totalSharpness(model,inputData,responseData,numPerturbations=10,percentPertu
     return sharpnessConstants(model,inputData,responseData,numPerturbations=numPerturbations,percentPerturbation=percentPerturbation)+sharpnessData(model,inputData,responseData,numPerturbations=numPerturbations,percentPerturbation=percentPerturbation,preserveSign=preserveSign)
 
 ############################
+#Model Curvature Computations
+#Based on the approach of Haut, Card, and Kotanchek
+############################
+
+def modelCurvature(model, inputData, diffFraction=0.01, maxPoints=None):
+    """modelCurvature(model, inputData, diffFraction=0.01, maxPoints=None)
+
+    Computes the mean model curvature over the input data points using the
+    average Frobenius norm of the numerical Hessian of the model output.
+    This implements the model curvature complexity measure of Haut, Card, and
+    Kotanchek, which captures how 'bent' or nonlinear the model surface is.
+
+    The Frobenius norm of the Hessian at a point x is:
+        ||H(x)||_F = sqrt( sum_{j,k} (d^2f / dx_j dx_k)^2 )
+
+    Second-order partial derivatives are estimated with central finite
+    differences.  The step size for variable j is
+        h_j = max(diffFraction * std(x_j), 1e-8)
+    making the estimate scale-invariant.
+
+    Parameters
+    ----------
+    model        : StackGP model (list of [ops, vars, quality])
+    inputData    : ndarray of shape (numVars, numPoints)
+    diffFraction : fraction of each variable's std used as the finite-difference
+                   step (default 0.01)
+    maxPoints    : if not None, subsample this many data points at random to
+                   keep computation tractable for large datasets
+
+    Returns
+    -------
+    float : mean Frobenius norm of the Hessian over valid data points,
+            or np.nan if no valid points exist.
+
+    Comparison with sharpness
+    -------------------------
+    * sharpnessConstants / sharpnessData perturb model constants or input data
+      by a fixed percentage and measure the resulting *fitness* change.  They
+      are stochastic and depend on the training objective (R^2).
+    * modelCurvature uses deterministic finite differences to measure the local
+      *geometric* curvature of the model surface, independent of the training
+      objective.  A linear model always has zero curvature; the metric grows
+      monotonically with the degree of nonlinearity in the response surface.
+    """
+    numVars = inputData.shape[0]
+    numPoints = inputData.shape[1]
+
+    # Scale-adaptive step sizes: one per variable
+    diffs = [max(diffFraction * float(np.std(inputData[v])), 1e-8) for v in range(numVars)]
+
+    # Optionally subsample data points for speed
+    if maxPoints is not None and maxPoints < numPoints:
+        indices = np.random.choice(numPoints, maxPoints, replace=False)
+    else:
+        indices = range(numPoints)
+
+    total_curvature = 0.0
+    valid_points = 0
+
+    for pt_idx in indices:
+        point = [float(inputData[v, pt_idx]) for v in range(numVars)]
+
+        frob_sq = 0.0
+        all_finite = True
+        for j in range(numVars):
+            if not all_finite:
+                break
+            for k in range(numVars):
+                d2f = Approx2Deriv(model, point, diffs[j], diffs[k], [j, k])
+                if not np.isfinite(d2f):
+                    all_finite = False
+                    break
+                frob_sq += d2f ** 2
+
+        if all_finite:
+            total_curvature += np.sqrt(frob_sq)
+            valid_points += 1
+
+    if valid_points == 0:
+        return np.nan
+
+    return total_curvature / valid_points
+
+############################
 #Multiple Independent Searches
 ############################
 def runEpochs(x,y,epochs=5,**kwargs):
