@@ -1419,3 +1419,801 @@ def generateRandomBenchmark(numVars=5, numSamples=100, noiseLevel=0, opsChoices=
         responseData += noise
 
     return inputData, responseData, randomModel
+
+
+############################
+# Feature 1: Multi-Output / Vector Symbolic Regression
+############################
+
+def evolveMultiOutput(inputData, responseData, **kwargs):
+    """Evolve one GP model population per output row in responseData.
+
+    inputData    : array of shape (n_features, n_samples)
+    responseData : array of shape (n_outputs, n_samples) or (n_samples,) for
+                   a single output.
+
+    Returns a list of model populations, one per output.
+    """
+    responseData = np.array(responseData)
+    if responseData.ndim == 1:
+        responseData = responseData.reshape(1, -1)
+    numOutputs = responseData.shape[0]
+    populations = []
+    for i in range(numOutputs):
+        populations.append(evolve(inputData, responseData[i], **kwargs))
+    return populations
+
+evolveMultiOutput.__doc__ = ("evolveMultiOutput(inputData, responseData, **kwargs) evolves one GP "
+                              "model population per output row and returns a list of populations")
+
+
+def evaluateMultiOutputModel(populations, inputData):
+    """Evaluate the best model from each population.
+
+    Returns an array of shape (n_outputs, n_samples).
+    """
+    return np.array([evaluateGPModel(pop[0], inputData) for pop in populations])
+
+evaluateMultiOutputModel.__doc__ = ("evaluateMultiOutputModel(populations, inputData) evaluates the "
+                                     "best model from each population and returns a (n_outputs, n_samples) array")
+
+
+############################
+# Feature 3: Island-Model / Migration GP (explicit wrapper around parallelEvolve)
+############################
+
+def islandEvolve(inputData, responseData, numIslands=4, totalGenerations=100,
+                  migrationInterval=10, migrationCount=5, **kwargs):
+    """Island-model GP: independent sub-populations that periodically share individuals.
+
+    numIslands         : number of independent sub-populations (islands).
+    totalGenerations   : total number of generations to run.
+    migrationInterval  : number of generations between migrations (cascade length).
+    migrationCount     : number of Pareto-front individuals to send between islands.
+    **kwargs           : additional arguments forwarded to evolve().
+
+    Internally uses parallelEvolve with cascades=True.
+    """
+    numCascades = max(1, totalGenerations // migrationInterval)
+    return parallelEvolve(
+        inputData, responseData,
+        n_jobs=numIslands,
+        cascades=True,
+        cascadeCount=numCascades,
+        exchangeCount=migrationCount,
+        generations=migrationInterval,
+        **kwargs
+    )
+
+islandEvolve.__doc__ = ("islandEvolve(inputData, responseData, numIslands=4, totalGenerations=100, "
+                         "migrationInterval=10, migrationCount=5, **kwargs) runs island-model GP "
+                         "with periodic migration between sub-populations")
+
+
+############################
+# Feature 4: Gradient-Based Constant Optimization
+############################
+
+def optimizeModelGradient(model, inputData, responseData, method='L-BFGS-B',
+                           bounds=None, eps=1e-5, **kwargs):
+    """Optimize numeric constants in a model using gradient-based L-BFGS-B.
+
+    Uses numerical finite differences for the Jacobian.  Faster than
+    differential_evolution for models with a small number of constants.
+
+    method : scipy.optimize.minimize method string (default 'L-BFGS-B').
+    bounds : list of (lo, hi) pairs, one per constant.  Defaults to (-1e6, 1e6).
+    eps    : finite-difference step size for gradient estimation.
+    """
+    indices = get_numeric_indices(model[1])
+    if not indices:
+        return model
+    startingVals = np.array([model[1][i] for i in indices], dtype=float)
+    fnc = lambda x: replaceEvaluate(model, x, inputData, responseData)
+
+    def grad(x):
+        g = np.zeros_like(x)
+        for j in range(len(x)):
+            xp, xm = x.copy(), x.copy()
+            xp[j] += eps
+            xm[j] -= eps
+            fp = fnc(xp)
+            fm = fnc(xm)
+            g[j] = (fp - fm) / (2.0 * eps) if (np.isfinite(fp) and np.isfinite(fm)) else 0.0
+        return g
+
+    if bounds is None:
+        bounds = [(-1e6, 1e6) for _ in startingVals]
+    out = minimize(fnc, startingVals, jac=grad, method=method, bounds=bounds, **kwargs)
+    newModel = copy.deepcopy(model)
+    for i in range(len(indices)):
+        newModel[1][indices[i]] = float(out.x[i])
+    setModelQuality(newModel, inputData, responseData)
+    return newModel
+
+optimizeModelGradient.__doc__ = ("optimizeModelGradient(model, inputData, responseData, method='L-BFGS-B', "
+                                   "bounds=None, eps=1e-5, **kwargs) optimizes numeric constants with gradient descent")
+
+
+############################
+# Feature 5: Grammar / Type Constraints on Operator Selection
+############################
+
+def makeTypeConstrainedOps(ops, variableTypes, typeOpConstraints):
+    """Return a filtered ops list compatible with the given variable types.
+
+    variableTypes     : list of type strings, one per variable
+                        e.g. ['angle', 'positive', 'real']
+    typeOpConstraints : dict mapping type string -> list of allowed operators
+                        e.g. {'angle': [sin, cos, tan],
+                               'positive': [log, sqrt],
+                               'real': allOps()}
+
+    Only operators that are allowed for at least one variable type present in
+    variableTypes (plus 'pop') are included in the returned list.
+    """
+    allowedOps = set()
+    for vtype in set(variableTypes):
+        if vtype in typeOpConstraints:
+            allowedOps.update(typeOpConstraints[vtype])
+    return [op for op in ops if op == 'pop' or op in allowedOps]
+
+makeTypeConstrainedOps.__doc__ = ("makeTypeConstrainedOps(ops, variableTypes, typeOpConstraints) returns "
+                                   "a filtered operator list respecting per-variable type constraints")
+
+
+############################
+# Feature 6: Symbolic Simplification-Aware Duplicate Removal
+############################
+
+def deleteDuplicateModelsSimplified(models, timeout=2):
+    """Remove semantically equivalent models by comparing simplified SymPy expressions.
+
+    More thorough than deleteDuplicateModelsPhenotype because it calls
+    sympy.simplify before comparing, catching algebraically equivalent forms.
+    Falls back to treating a model as unique if simplification times out.
+    """
+    simplified = []
+    kept = []
+    for mod in models:
+        try:
+            with time_limit(timeout):
+                expr = sym.simplify(printGPModel(mod))
+                sexpr = str(expr)
+        except (TimeoutException, Exception):
+            sexpr = "_unique_" + str(len(kept))
+        if sexpr not in simplified:
+            simplified.append(sexpr)
+            kept.append(mod)
+    return kept
+
+deleteDuplicateModelsSimplified.__doc__ = ("deleteDuplicateModelsSimplified(models, timeout=2) removes "
+                                            "semantically equivalent models using sympy.simplify")
+
+
+############################
+# Feature 7: Niching / Diversity Preservation (NSGA-II Crowding Distance)
+############################
+
+def crowdingDistance(fitValues):
+    """Compute NSGA-II crowding distances for a 2-D array of fitness values.
+
+    fitValues : numpy array of shape (n_models, n_objectives)
+    Returns   : 1-D array of crowding distances (length n_models).
+                Boundary individuals receive distance inf.
+    """
+    n = len(fitValues)
+    if n == 0:
+        return np.array([])
+    nObj = fitValues.shape[1]
+    distances = np.zeros(n)
+    for obj in range(nObj):
+        order = np.argsort(fitValues[:, obj])
+        distances[order[0]] = np.inf
+        distances[order[-1]] = np.inf
+        objRange = fitValues[order[-1], obj] - fitValues[order[0], obj]
+        if objRange == 0:
+            continue
+        for i in range(1, n - 1):
+            distances[order[i]] += (
+                (fitValues[order[i + 1], obj] - fitValues[order[i - 1], obj]) / objRange
+            )
+    return distances
+
+crowdingDistance.__doc__ = ("crowdingDistance(fitValues) computes NSGA-II crowding distances "
+                              "for a (n_models, n_objectives) array of fitness values")
+
+
+def nichingSelect(models, popSize):
+    """Select models using Pareto rank + crowding distance (NSGA-II style).
+
+    Iteratively extracts Pareto fronts; within the last front that would
+    overflow the budget, individuals are ranked by crowding distance so
+    that structurally diverse models are preferred.
+    """
+    tMods = copy.deepcopy(models)
+    [modelToListForm(mod) for mod in tMods]
+    selected = []
+    remaining = tMods[:]
+
+    while len(selected) < popSize and remaining:
+        fitVals = np.array([mod[2] for mod in remaining], dtype=float)
+        front_mask = paretoFront(fitVals)
+        front = [remaining[i] for i in range(len(remaining)) if front_mask[i]]
+
+        if len(selected) + len(front) <= popSize:
+            selected.extend(front)
+            remaining = [remaining[i] for i in range(len(remaining)) if not front_mask[i]]
+        else:
+            need = popSize - len(selected)
+            frontFits = np.array([mod[2] for mod in front], dtype=float)
+            dists = crowdingDistance(frontFits)
+            order = np.argsort(dists)[::-1]
+            selected.extend([front[i] for i in order[:need]])
+            break
+
+    [modelRestoreForm(mod) for mod in selected]
+    return selected
+
+nichingSelect.__doc__ = ("nichingSelect(models, popSize) selects models using Pareto rank and "
+                          "crowding distance to preserve diversity in the population")
+
+
+############################
+# Feature 8: Constraint-Satisfaction / Physics-Informed Loss
+############################
+
+def makeConstrainedFitness(baseFitness, constraints):
+    """Create a physics-informed fitness function with soft constraint penalties.
+
+    baseFitness : base fitness function with signature f(model, inputData, response)
+    constraints : list of (constraint_fn, weight) tuples where
+                  constraint_fn(model, inputData, response) -> float (0 = fully satisfied)
+
+    Returns a new fitness function that adds weighted penalty terms to the base fitness.
+    """
+    def constrainedFitness(model, inputData, response):
+        base = baseFitness(model, inputData, response)
+        if np.isnan(base):
+            return np.nan
+        penalty = sum(w * cf(model, inputData, response) for cf, w in constraints)
+        return base + penalty
+    constrainedFitness.__name__ = getattr(baseFitness, '__name__', 'fitness') + "_constrained"
+    return constrainedFitness
+
+makeConstrainedFitness.__doc__ = ("makeConstrainedFitness(baseFitness, constraints) wraps a fitness "
+                                   "function with soft constraint penalties for physics-informed SR")
+
+
+############################
+# Feature 9: Save/Load Model Populations (Serialization API)
+############################
+
+STACKGP_VERSION = "1.0"
+
+
+def savePopulation(models, path, metadata=None):
+    """Save a model population to disk with versioning metadata.
+
+    models   : list of GP models to save.
+    path     : file path (string) to write to.
+    metadata : optional dict of user-supplied metadata (e.g. variable names, fitness).
+    """
+    data = {
+        'stackgp_version': STACKGP_VERSION,
+        'timestamp': time.time(),
+        'models': models,
+        'metadata': metadata or {}
+    }
+    with open(path, 'wb') as f:
+        dill.dump(data, f)
+
+savePopulation.__doc__ = ("savePopulation(models, path, metadata=None) serialises a model "
+                           "population to disk with version and timestamp metadata")
+
+
+def loadPopulation(path):
+    """Load a model population from disk.
+
+    Returns a (models, metadata) tuple.
+    For legacy files that stored a raw model list, metadata is an empty dict.
+    """
+    with open(path, 'rb') as f:
+        data = dill.load(f)
+    if isinstance(data, dict) and 'models' in data:
+        return data['models'], data.get('metadata', {})
+    return data, {}
+
+loadPopulation.__doc__ = ("loadPopulation(path) deserialises a model population from disk "
+                           "and returns (models, metadata)")
+
+
+############################
+# Feature 10: Sklearn-Compatible Estimator Interface
+############################
+
+try:
+    from sklearn.base import BaseEstimator, RegressorMixin as _RegressorMixin
+
+    class StackGPRegressor(BaseEstimator, _RegressorMixin):
+        """Scikit-learn compatible wrapper for StackGP symbolic regression.
+
+        Implements fit(X, y) / predict(X) / score(X, y) following the sklearn
+        BaseEstimator / RegressorMixin interface so that StackGPRegressor can
+        be used in sklearn pipelines, cross-validation, and GridSearchCV.
+
+        Parameters
+        ----------
+        generations : int
+            Number of evolutionary generations.
+        popSize : int
+            Population size.
+        ops : list or None
+            Operator set.  Defaults to defaultOps() when None.
+        align : bool
+            Whether to align models after evolution.
+        elitismRate : int
+            Percentage of population preserved as elites each generation.
+        timeLimit : float
+            Maximum wall-clock time in seconds (used when capTime=True).
+        capTime : bool
+            Whether to cap evolution by wall-clock time.
+        """
+
+        def __init__(self, generations=100, popSize=300, ops=None, align=True,
+                     elitismRate=10, timeLimit=300, capTime=False):
+            self.generations = generations
+            self.popSize = popSize
+            self.ops = ops
+            self.align = align
+            self.elitismRate = elitismRate
+            self.timeLimit = timeLimit
+            self.capTime = capTime
+
+        def fit(self, X, y):
+            """Fit the GP model to training data.
+
+            X : array-like of shape (n_samples, n_features)
+            y : array-like of shape (n_samples,)
+            """
+            X = np.array(X)
+            y = np.array(y)
+            inputData = X.T  # StackGP expects (n_features, n_samples)
+            ops = self.ops if self.ops is not None else defaultOps()
+            self.models_ = evolve(
+                inputData, y,
+                generations=self.generations,
+                popSize=self.popSize,
+                ops=ops,
+                align=self.align,
+                elitismRate=self.elitismRate,
+                timeLimit=self.timeLimit,
+                capTime=self.capTime,
+            )
+            self.best_model_ = self.models_[0]
+            return self
+
+        def predict(self, X):
+            """Predict using the best evolved model.
+
+            X : array-like of shape (n_samples, n_features)
+            """
+            X = np.array(X)
+            pred = evaluateGPModel(self.best_model_, X.T)
+            return np.array(pred)
+
+        def get_expression(self):
+            """Return the symbolic expression string of the best model."""
+            return str(printGPModel(self.best_model_))
+
+except ImportError:
+    pass
+
+
+############################
+# Feature 11: Categorical / Mixed-Type Variable Support
+############################
+
+class CategoricalEncoder:
+    """Encode categorical variables for use with StackGP.
+
+    Numeric columns are passed through unchanged.  Categorical columns are
+    encoded using either one-hot ('onehot') or ordinal ('ordinal') encoding.
+
+    Parameters
+    ----------
+    encoding            : 'onehot' or 'ordinal'
+    categorical_indices : list of int column indices to treat as categorical,
+                          or None to auto-detect.
+    threshold           : maximum number of unique values for auto-detection.
+
+    Input arrays are expected in StackGP's (n_features, n_samples) layout.
+    """
+
+    def __init__(self, encoding='onehot', categorical_indices=None, threshold=10):
+        self.encoding = encoding
+        self.categorical_indices = categorical_indices
+        self.threshold = threshold
+        self.categories_ = {}
+        self._cat_idx = []
+
+    def fit(self, X):
+        """Fit encoder to X (shape: n_features × n_samples or n_samples × n_features)."""
+        X = np.array(X, dtype=object)
+        if X.shape[0] > X.shape[1]:
+            X = X.T  # ensure (n_features, n_samples)
+        n_features = X.shape[0]
+        if self.categorical_indices is None:
+            self._cat_idx = [
+                j for j in range(n_features)
+                if len(np.unique(X[j])) <= self.threshold
+            ]
+        else:
+            self._cat_idx = list(self.categorical_indices)
+        for j in self._cat_idx:
+            self.categories_[j] = sorted(set(X[j]))
+        return self
+
+    def transform(self, X):
+        """Encode X and return array of shape (n_features_out, n_samples)."""
+        X = np.array(X, dtype=object)
+        if X.shape[0] > X.shape[1]:
+            X = X.T  # ensure (n_features, n_samples)
+        n_features = X.shape[0]
+        out_cols = []
+        for j in range(n_features):
+            if j in self._cat_idx:
+                cats = self.categories_[j]
+                if self.encoding == 'onehot':
+                    for c in cats:
+                        out_cols.append((X[j] == c).astype(float))
+                else:
+                    mapping = {c: i for i, c in enumerate(cats)}
+                    out_cols.append(np.array([mapping.get(v, -1) for v in X[j]], dtype=float))
+            else:
+                out_cols.append(X[j].astype(float))
+        return np.array(out_cols)
+
+    def fit_transform(self, X):
+        """Fit and transform X in one step."""
+        return self.fit(X).transform(X)
+
+
+############################
+# Feature 12: Adaptive Operator Probabilities
+############################
+
+def adaptiveEvolve(inputData, responseData, generations=100, ops=None,
+                   const=None, popSize=300, mutationRate=79, crossoverRate=11,
+                   spawnRate=10, elitismRate=10, maxComplexity=100, align=True,
+                   initialPop=None, tourneySize=5,
+                   modelEvaluationMetrics=None):
+    """Evolve with adaptive operator probabilities using credit assignment.
+
+    Operators that appear in children with fitness improvements receive a
+    higher selection probability in subsequent generations.  Credit is
+    computed as the mean fitness improvement (lower fitness is better) of
+    children containing each operator relative to their parents.
+
+    All parameters mirror those of evolve().
+    """
+    if ops is None:
+        ops = defaultOps()
+    if const is None:
+        const = defaultConst()
+    if initialPop is None:
+        initialPop = []
+    if modelEvaluationMetrics is None:
+        metrics = [fitness, stackGPModelComplexity]
+    elif callable(modelEvaluationMetrics):
+        metrics = [modelEvaluationMetrics]
+    else:
+        metrics = list(modelEvaluationMetrics)
+
+    fullInput = copy.deepcopy(inputData)
+    fullResponse = copy.deepcopy(responseData)
+    variableCount = varCount(fullInput)
+
+    uniqueOps = list(dict.fromkeys(ops))
+    opWeights = {op: 1.0 for op in uniqueOps}
+
+    def weightedOpList():
+        wts = np.array([opWeights[op] for op in uniqueOps], dtype=float)
+        wts = wts / wts.sum()
+        counts = np.maximum(1, np.round(wts * len(uniqueOps) * 2).astype(int))
+        return [op for op, cnt in zip(uniqueOps, counts) for _ in range(cnt)]
+
+    models = initializeGPModels(variableCount, ops, const, popSize)
+    models = models + copy.deepcopy(initialPop)
+
+    for gen in range(generations):
+        for mod in models:
+            setModelQuality(mod, fullInput, fullResponse, modelEvaluationMetrics=metrics)
+        models = removeIndeterminateModels(models)
+        if not models:
+            models = initializeGPModels(variableCount, ops, const, popSize)
+            continue
+
+        prevFits = {id(m): m[2][0] for m in models if m[2] and not np.isnan(m[2][0])}
+        paretoModels = selectModels(
+            models,
+            elitismRate / 100 * popSize if elitismRate / 100 * popSize < len(models) else len(models)
+        )
+        models = tournamentModelSelection(models, popSize, tourneySize)
+
+        currentOps = weightedOpList()
+        toMutate = random.sample(models, min(round(mutationRate / 100 * popSize), len(models)))
+        childModels = paretoModels[:]
+        opCredits = {op: [] for op in uniqueOps}
+
+        for parent in toMutate:
+            child = mutate(parent, variableCount, currentOps, const)
+            setModelQuality(child, fullInput, fullResponse, modelEvaluationMetrics=metrics)
+            if child[2] and not np.isnan(child[2][0]):
+                parentFit = prevFits.get(id(parent), child[2][0])
+                improvement = parentFit - child[2][0]
+                for op in child[0]:
+                    if op in opCredits:
+                        opCredits[op].append(improvement)
+            childModels.append(child)
+
+        crossoverPairs = random.sample(models, min(round(crossoverRate / 100 * popSize), len(models)))
+        for j in range(round(len(crossoverPairs) / 2) - 1):
+            childModels = childModels + recombination2pt(
+                crossoverPairs[j],
+                crossoverPairs[j + round(len(crossoverPairs) / 2)]
+            )
+
+        for op in uniqueOps:
+            if opCredits[op]:
+                opWeights[op] = max(0.05, opWeights[op] + 0.1 * np.mean(opCredits[op]))
+        total = sum(opWeights.values())
+        for op in uniqueOps:
+            opWeights[op] = opWeights[op] / total * len(uniqueOps)
+
+        childModels += initializeGPModels(variableCount, ops, const, round(spawnRate / 100 * popSize))
+        childModels = deleteDuplicateModels(childModels)
+        childModels = [m for m in childModels if stackGPModelComplexity(m) < maxComplexity]
+        if len(childModels) < popSize:
+            childModels += initializeGPModels(variableCount, ops, const, popSize - len(childModels))
+        models = copy.deepcopy(childModels)
+
+    for mod in models:
+        setModelQuality(mod, fullInput, fullResponse, modelEvaluationMetrics=metrics)
+    models = [trimModel(m) for m in models]
+    models = deleteDuplicateModels(models)
+    models = removeIndeterminateModels(models)
+    models = sortModels(models)
+    if align:
+        models = [alignGPModel(m, fullInput, fullResponse) for m in models]
+        for mod in models:
+            setModelQuality(mod, fullInput, fullResponse, modelEvaluationMetrics=metrics)
+    return models
+
+adaptiveEvolve.__doc__ = ("adaptiveEvolve(inputData, responseData, generations=100, ops=None, ...) "
+                            "evolves with adaptive operator probabilities via credit assignment")
+
+
+############################
+# Feature 13: Pareto Front Export / Reporting
+############################
+
+def summarizeModels(models, inputData, response, variableNames=None):
+    """Return a pandas DataFrame summarising the Pareto-front models.
+
+    Columns: Expression, R2, RMSE, Complexity, Variables.
+
+    models        : list of GP models (typically the output of evolve()).
+    inputData     : array of shape (n_features, n_samples).
+    response      : array of shape (n_samples,).
+    variableNames : list of variable name strings.  Auto-generated if None.
+    """
+    try:
+        import pandas as pd
+    except ImportError:
+        raise ImportError("pandas is required for summarizeModels. Install with: pip install pandas")
+
+    n_vars = varCount(inputData)
+    if variableNames is None:
+        variableNames = ["x" + str(i) for i in range(n_vars)]
+
+    tMods = copy.deepcopy(models)
+    [modelToListForm(mod) for mod in tMods]
+    paretoMods = paretoTournament(tMods)
+    [modelRestoreForm(mod) for mod in paretoMods]
+
+    rows = []
+    symVars = symbols(variableNames[:n_vars])
+    for mod in paretoMods:
+        expr = str(printGPModel(mod, inputData=symVars))
+        pred = evaluateGPModel(mod, inputData)
+        try:
+            pred = np.array(pred, dtype=float)
+            resp = np.array(response, dtype=float)
+            if np.all(np.isfinite(pred)) and not np.all(pred == pred[0]):
+                r2_val = float(pearsonr(pred, resp)[0] ** 2)
+                rmse_val = float(np.sqrt(np.mean((pred - resp) ** 2)))
+            else:
+                r2_val, rmse_val = np.nan, np.nan
+        except Exception:
+            r2_val, rmse_val = np.nan, np.nan
+
+        complexity = stackGPModelComplexity(mod)
+        varList = varReplace(mod[1], variableNames[:n_vars])
+        used = sorted(set(v for v in varList if isinstance(v, str)))
+        rows.append({
+            'Expression': expr,
+            'R2': r2_val,
+            'RMSE': rmse_val,
+            'Complexity': complexity,
+            'Variables': ', '.join(used)
+        })
+    return pd.DataFrame(rows)
+
+summarizeModels.__doc__ = ("summarizeModels(models, inputData, response, variableNames=None) returns "
+                            "a pandas DataFrame with expression, R², RMSE, complexity, and variables "
+                            "for each Pareto-front model")
+
+
+############################
+# Feature 14: Interactive Model Exploration Dashboard
+############################
+
+def modelDashboard(models, inputData, response, variableNames=None):
+    """Interactive model exploration dashboard using ipywidgets.
+
+    Displays a dropdown of Pareto-front models.  Selecting a model renders:
+      - a Pareto front scatter with the selected model highlighted,
+      - a prediction-vs-truth scatter plot, and
+      - a residual plot.
+
+    Requires ipywidgets and an IPython / Jupyter environment.
+    """
+    try:
+        import ipywidgets as widgets
+        from IPython.display import display as ipy_display
+    except ImportError:
+        print("ipywidgets is required for modelDashboard. Install with: pip install ipywidgets")
+        return
+
+    n_vars = varCount(inputData)
+    if variableNames is None:
+        variableNames = ["x" + str(i) for i in range(n_vars)]
+
+    tMods = copy.deepcopy(models)
+    [modelToListForm(mod) for mod in tMods]
+    paretoMods = paretoTournament(tMods)
+    [modelRestoreForm(mod) for mod in paretoMods]
+
+    exprs = [str(printGPModel(m, inputData=symbols(variableNames[:n_vars]))) for m in paretoMods]
+    complexities = [
+        mod[2][1] if len(mod[2]) > 1 else stackGPModelComplexity(mod)
+        for mod in paretoMods
+    ]
+    accuracies = [mod[2][0] for mod in paretoMods]
+
+    options = [
+        (f"#{i}: {exprs[i][:60]}..." if len(exprs[i]) > 60 else f"#{i}: {exprs[i]}", i)
+        for i in range(len(paretoMods))
+    ]
+    dropdown = widgets.Dropdown(options=options, description='Model:',
+                                layout=widgets.Layout(width='80%'))
+    output = widgets.Output()
+
+    def on_change(change):
+        idx = change['new']
+        mod = paretoMods[idx]
+        pred = evaluateGPModel(mod, inputData)
+        with output:
+            output.clear_output(wait=True)
+            fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+
+            axes[0].scatter(complexities, accuracies, color='red', s=50)
+            axes[0].scatter([complexities[idx]], [accuracies[idx]],
+                            color='gold', s=150, zorder=5, label='Selected')
+            axes[0].set_xlabel("Complexity")
+            axes[0].set_ylabel("1-R\u00b2")
+            axes[0].set_title("Pareto Front")
+            axes[0].legend()
+
+            resp_arr = np.array(response)
+            pred_arr = np.array(pred)
+            axes[1].scatter(resp_arr, pred_arr, alpha=0.6)
+            mn, mx = resp_arr.min(), resp_arr.max()
+            axes[1].plot([mn, mx], [mn, mx], 'g-', label='Perfect')
+            axes[1].set_xlabel("True Response")
+            axes[1].set_ylabel("Predicted")
+            axes[1].set_title("Prediction vs Truth")
+            axes[1].legend()
+
+            residuals = pred_arr - resp_arr
+            axes[2].scatter(resp_arr, residuals, alpha=0.6)
+            axes[2].axhline(0, color='green', linestyle='--')
+            axes[2].set_xlabel("True Response")
+            axes[2].set_ylabel("Residual")
+            axes[2].set_title("Residuals")
+
+            plt.suptitle(f"Expression: {exprs[idx]}", fontsize=9)
+            plt.tight_layout()
+            plt.show()
+            print(f"Expression: {exprs[idx]}")
+
+    dropdown.observe(on_change, names='value')
+    ipy_display(widgets.VBox([dropdown, output]))
+    on_change({'new': 0})
+
+modelDashboard.__doc__ = ("modelDashboard(models, inputData, response, variableNames=None) shows an "
+                           "interactive Pareto-front exploration dashboard powered by ipywidgets")
+
+
+############################
+# Feature 15: Noise-Robust Fitness Metrics
+############################
+
+def huberFitness(model, inputData, response, delta=1.0):
+    """Huber-loss fitness function, robust to outliers.
+
+    Returns the mean Huber loss:
+      L(e) = 0.5*e^2              if |e| <= delta
+           = delta*(|e| - 0.5*delta)  otherwise
+    """
+    pred = evaluateGPModel(model, inputData)
+    if pred is None:
+        return np.nan
+    pred = np.array(pred, dtype=float)
+    resp = np.array(response, dtype=float)
+    if not np.all(np.isfinite(pred)):
+        return np.nan
+    err = pred - resp
+    loss = np.where(np.abs(err) <= delta,
+                    0.5 * err ** 2,
+                    delta * (np.abs(err) - 0.5 * delta))
+    return float(np.mean(loss))
+
+huberFitness.__doc__ = ("huberFitness(model, inputData, response, delta=1.0) returns mean Huber "
+                         "loss, robust to outliers")
+
+
+def madFitness(model, inputData, response):
+    """Median Absolute Deviation fitness function, highly robust to outliers."""
+    pred = evaluateGPModel(model, inputData)
+    if pred is None:
+        return np.nan
+    pred = np.array(pred, dtype=float)
+    resp = np.array(response, dtype=float)
+    if not np.all(np.isfinite(pred)):
+        return np.nan
+    return float(np.median(np.abs(pred - resp)))
+
+madFitness.__doc__ = ("madFitness(model, inputData, response) returns the Median Absolute "
+                       "Deviation, highly robust to outliers")
+
+
+def trimmedR2Fitness(model, inputData, response, trimFraction=0.1):
+    """Trimmed R\u00b2 fitness: 1-R\u00b2 computed after removing the most extreme residuals.
+
+    trimFraction : fraction of samples with the largest absolute residuals to
+                   exclude before computing R\u00b2 (0 = no trimming, 0.5 = half removed).
+    """
+    pred = evaluateGPModel(model, inputData)
+    if pred is None:
+        return np.nan
+    pred = np.array(pred, dtype=float)
+    resp = np.array(response, dtype=float)
+    if not np.all(np.isfinite(pred)):
+        return np.nan
+    n = len(resp)
+    nTrim = int(np.floor(trimFraction * n))
+    order = np.argsort(np.abs(pred - resp))
+    idx = order[:n - nTrim] if nTrim > 0 else order
+    try:
+        r2 = pearsonr(pred[idx], resp[idx])[0] ** 2
+    except Exception:
+        return 1.0
+    if np.isnan(r2):
+        return 1.0
+    return 1.0 - r2
+
+trimmedR2Fitness.__doc__ = ("trimmedR2Fitness(model, inputData, response, trimFraction=0.1) returns "
+                              "1-R\u00b2 computed on the central (1-2*trimFraction) fraction of samples, "
+                              "down-weighting outliers")
