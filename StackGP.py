@@ -28,6 +28,11 @@ except:
 
 import signal #for timing out functions
 from contextlib import contextmanager #for timing out functions
+try:
+    import numba as _numba
+    _NUMBA_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    _NUMBA_AVAILABLE = False
 
 warnings.filterwarnings('ignore', '.*invalid value.*' )
 warnings.filterwarnings('ignore', '.*overflow.*' )
@@ -241,46 +246,275 @@ inputLen.__doc__ = "inputLen(data) determines the number of data records in a da
 def varCount(data): #Returns the number of variables in a data set
     return len(data)
 varCount.__doc__ = "varCount(data) determines the number of variables in a data set"
+
+# ─── Numba JIT infrastructure ─────────────────────────────────────────────────
+# Integer dispatch codes used inside the Numba-compiled evaluation kernel.
+_NB_POP  = -1
+_NB_ADD  =  0; _NB_SUB   =  1; _NB_MULT  =  2; _NB_DIV   =  3; _NB_POW  =  4
+_NB_AND  =  5; _NB_OR    =  6; _NB_XOR   =  7; _NB_NAND  =  8; _NB_NOR  =  9
+_NB_XNOR = 10; _NB_EXP   = 11; _NB_SQRD  = 12; _NB_SQRT  = 13; _NB_INV  = 14
+_NB_NEG  = 15; _NB_SIN   = 16; _NB_COS   = 17; _NB_TAN   = 18; _NB_ACOS = 19
+_NB_ASIN = 20; _NB_ATAN  = 21; _NB_TANH  = 22; _NB_LOG   = 23; _NB_LOG10= 24
+_NB_LOG2 = 25; _NB_ABS   = 26; _NB_NOT   = 27
+
+# Mapping from every known operator to its integer dispatch code.
+_OP_TO_CODE = {
+    add: _NB_ADD,   sub: _NB_SUB,    mult: _NB_MULT,  protectDiv: _NB_DIV,
+    power: _NB_POW, and1: _NB_AND,   or1: _NB_OR,     xor1: _NB_XOR,
+    nand1: _NB_NAND, nor1: _NB_NOR,  xnor1: _NB_XNOR,
+    exp: _NB_EXP,   sqrd: _NB_SQRD,  sqrt: _NB_SQRT,  inv: _NB_INV,
+    neg: _NB_NEG,   sin: _NB_SIN,    cos: _NB_COS,    tan: _NB_TAN,
+    arccos: _NB_ACOS, arcsin: _NB_ASIN, arctan: _NB_ATAN, tanh: _NB_TANH,
+    log: _NB_LOG,   log10: _NB_LOG10, log2: _NB_LOG2,  abs1: _NB_ABS,
+    not1: _NB_NOT,  "pop": _NB_POP,
+}
+
+# LRU cache for compiled (op_codes, arities, var_map, const_vals) tuples.
+from collections import OrderedDict as _OrderedDict
+_compiled_model_cache = _OrderedDict()
+_COMPILED_CACHE_MAX_SIZE = 5000
+
+# Number of data points below which the Numba scalar kernel is faster than
+# numpy-vectorised evaluation (empirically ~30–50 for defaultOps models).
+_NUMBA_N_THRESHOLD = 30
+
+
+def _precompile_model_for_numba(model):
+    """Convert a GP model to NumPy integer arrays for Numba-accelerated evaluation.
+
+    Returns a tuple ``(op_codes, arities, var_map, const_vals)`` on success, or
+    ``None`` if the model contains an operator not present in *_OP_TO_CODE*.
+
+    * ``op_codes``   – int32 array of dispatch codes (one per op in model[0])
+    * ``arities``    – int32 array of arities (0 for "pop")
+    * ``var_map``    – int32 array: ``>= 0`` → variable index into data row;
+                       ``< 0``  → constant at ``const_vals[-idx-1]``
+    * ``const_vals`` – float64 array of numeric constants from model[1]
+    """
+    ops       = model[0]
+    vars_list = model[1]
+    n_ops     = len(ops)
+
+    op_codes = np.empty(n_ops, dtype=np.int32)
+    arities  = np.empty(n_ops, dtype=np.int32)
+    for i, op in enumerate(ops):
+        code = _OP_TO_CODE.get(op, None)
+        if code is None:
+            return None
+        op_codes[i] = code
+        arities[i]  = 0 if code == _NB_POP else getArity(op)
+
+    vm_list = []; cv_list = []; ci = 0
+    for v in vars_list:
+        if callable(v) and getattr(v, '__closure__', None):
+            vm_list.append(int(v.__closure__[0].cell_contents))
+        else:
+            vm_list.append(-(ci + 1))
+            cv_list.append(float(v))
+            ci += 1
+
+    return (np.array(vm_list, dtype=np.int32),  op_codes, arities,
+            np.array(cv_list, dtype=np.float64))
+
+
+def _model_compile_key(model):
+    """Return a hashable, content-based cache key for *model*.
+
+    The key equals after ``copy.deepcopy`` because:
+    * ``model[0].tobytes()`` captures the object-pointer bytes of the operator
+      array; module-level function objects are singletons with stable ids.
+    * The vars tuple tags each element with ``'v'`` (variable index) or ``'c'``
+      (numeric constant) so that variable index 0 and constant 0.0 produce
+      distinct keys even though ``0 == 0.0`` in Python.
+    """
+    vars_key = tuple(
+        ('v', int(v.__closure__[0].cell_contents))
+        if (callable(v) and getattr(v, '__closure__', None))
+        else ('c', v)
+        for v in model[1]
+    )
+    return (model[0].tobytes(), vars_key)
+
+
+def _get_or_build_compiled(model):
+    """Return cached compiled arrays for *model*, building and caching on miss."""
+    key = _model_compile_key(model)
+    try:
+        _compiled_model_cache.move_to_end(key)
+        return _compiled_model_cache[key]
+    except KeyError:
+        compiled = _precompile_model_for_numba(model)
+        _compiled_model_cache[key] = compiled
+        if len(_compiled_model_cache) > _COMPILED_CACHE_MAX_SIZE:
+            _compiled_model_cache.popitem(last=False)
+        return compiled
+
+
+if _NUMBA_AVAILABLE:
+    @_numba.njit(cache=True)
+    def _numba_eval_single_point(op_codes, arities, var_map, const_vals, x):
+        """Evaluate a compiled GP model at a single data point *x* (1-D float64).
+
+        Implements the same stack-based semantics as ``evModHelper`` but uses
+        scalar arithmetic so Numba can JIT-compile the entire dispatch loop.
+
+        Parameters
+        ----------
+        op_codes   : int32[:]  – dispatch codes from ``_precompile_model_for_numba``
+        arities    : int32[:]  – operator arities (0 for pop)
+        var_map    : int32[:]  – variable indices / constant back-references
+        const_vals : float64[:]– numeric constants
+        x          : float64[:]– one data point (all variables at that index)
+
+        Returns
+        -------
+        float64 scalar result (NaN on numeric errors or malformed models)
+        """
+        stack = np.empty(64, dtype=np.float64)
+        sp   = 0        # next empty slot in stack
+        vi   = 0        # next index into var_map
+        n_vm = len(var_map)
+
+        for oi in range(len(op_codes)):
+            code  = op_codes[oi]
+            arity = arities[oi]
+
+            if code == -1:  # pop: push next variable/constant if still available
+                if vi < n_vm:
+                    vm = var_map[vi]; vi += 1
+                    stack[sp] = x[vm] if vm >= 0 else const_vals[-vm - 1]
+                    sp += 1
+            else:
+                # Fill the stack until it holds at least *arity* entries.
+                while sp < arity:
+                    if vi < n_vm:
+                        vm = var_map[vi]; vi += 1
+                        stack[sp] = x[vm] if vm >= 0 else const_vals[-vm - 1]
+                    else:
+                        stack[sp] = np.nan  # guard: malformed model
+                    sp += 1
+
+                # Pop operands (they are now at stack[sp-arity:sp]).
+                sp -= arity
+                a = stack[sp]
+                b = stack[sp + 1] if arity >= 2 else 0.0
+
+                # Integer dispatch – one branch per operator.
+                if   code ==  0: r = a + b
+                elif code ==  1: r = a - b
+                elif code ==  2: r = a * b
+                elif code ==  3: r = a / b if b != 0.0 else np.nan        # protectDiv
+                elif code ==  4: r = a ** b if a != 0.0 else np.nan       # power
+                elif code ==  5: r = 1.0 if (a != 0.0 and b != 0.0) else 0.0  # and1
+                elif code ==  6: r = 1.0 if (a != 0.0 or  b != 0.0) else 0.0  # or1
+                elif code ==  7: r = 1.0 if ((a != 0.0) != (b != 0.0)) else 0.0  # xor1
+                elif code ==  8: r = 0.0 if (a != 0.0 and b != 0.0) else 1.0  # nand1
+                elif code ==  9: r = 0.0 if (a != 0.0 or  b != 0.0) else 1.0  # nor1
+                elif code == 10: r = 1.0 if ((a != 0.0) == (b != 0.0)) else 0.0  # xnor1
+                elif code == 11:  # exp – NaN passthrough; clamp to avoid C-level overflow
+                    r = np.nan if a != a else (np.inf if a > 709.782 else math.exp(a))
+                elif code == 12: r = a * a                                 # sqrd
+                elif code == 13: r = math.sqrt(a) if a >= 0.0 else np.nan # sqrt
+                elif code == 14: r = 1.0 / a if a != 0.0 else np.inf      # inv (±inf at 0, matches numpy)
+                elif code == 15: r = -a                                    # neg
+                elif code == 16: r = math.sin(a)
+                elif code == 17: r = math.cos(a)
+                elif code == 18: r = math.tan(a)
+                elif code == 19: r = math.acos(a) if -1.0 <= a <= 1.0 else np.nan
+                elif code == 20: r = math.asin(a) if -1.0 <= a <= 1.0 else np.nan
+                elif code == 21: r = math.atan(a)
+                elif code == 22: r = math.tanh(a)
+                elif code == 23: r = math.log(a)   if a > 0.0 else np.nan
+                elif code == 24: r = math.log10(a) if a > 0.0 else np.nan
+                elif code == 25: r = math.log2(a)  if a > 0.0 else np.nan
+                elif code == 26: r = abs(a)                                # abs1
+                elif code == 27: r = 0.0 if a != 0.0 else 1.0             # not1
+                else:            r = np.nan
+
+                stack[sp] = r
+                sp += 1
+
+        return stack[sp - 1] if sp > 0 else np.nan
+
+    @_numba.njit(cache=True)
+    def _numba_eval_all_points(op_codes, arities, var_map, const_vals, data_T):
+        """Evaluate a compiled GP model on all data points.
+
+        Parameters
+        ----------
+        data_T : float64 array, shape (n_pts, n_vars)
+            Row-major input where each row is one data point (all variables).
+
+        Returns
+        -------
+        result : float64 array, shape (n_pts,)
+        """
+        n_pts  = data_T.shape[0]
+        result = np.empty(n_pts, dtype=np.float64)
+        for i in range(n_pts):
+            result[i] = _numba_eval_single_point(
+                op_codes, arities, var_map, const_vals, data_T[i]
+            )
+        return result
+
+# ─────────────────────────────────────────────────────────────────────────────
+
 def evaluateGPModel(model,inputData): #Evaluates a model numerically
-    data=np.array(inputData).astype(float)
-    response=evModHelper(model[1],model[0],[],data)[2][0]
-    if not isinstance(response,np.ndarray) and inputLen(inputData)>1:
-        response=np.full(inputLen(inputData),response,dtype=float)
+    data = np.array(inputData, dtype=np.float64)
+    n_pts = inputLen(data)
+
+    # Numba fast path: scalar per-point evaluation beats vectorised numpy for
+    # small datasets (empirically n_pts ≤ ~30 for defaultOps models).
+    if _NUMBA_AVAILABLE and data.ndim == 2 and n_pts <= _NUMBA_N_THRESHOLD:
+        compiled = _get_or_build_compiled(model)
+        if compiled is not None:
+            var_map, op_codes, arities, const_vals = compiled
+            data_T = np.ascontiguousarray(data.T)
+            return _numba_eval_all_points(op_codes, arities, var_map, const_vals, data_T)
+
+    # Optimised Python path (vectorised numpy per operator).
+    response = evModHelper(model[1], model[0], [], data)[2][0]
+    if not isinstance(response, np.ndarray) and n_pts > 1:
+        response = np.full(n_pts, response, dtype=float)
     return response
 evaluateGPModel.__doc__ = "evaluateGPModel(model,data) numerically evaluates a model using the data stored in inputData"
 def evModHelper(varStack,opStack,tempStack,data): #Iterative helper function for evaluateGPModel
-    var_list=list(varStack)
-    op_list=list(opStack)
-    stack3=list(tempStack)
+    op_list  = opStack          # numpy object array – iterate directly
+    stack3   = list(tempStack)  # working stack
 
-    if len(op_list)==0:
-        return [stack3,[],var_list]
+    if len(op_list) == 0:
+        return [list(varStack), [], list(varStack)]
 
-    var_idx=0
+    # Pre-resolve all variable selectors once upfront.  This replaces the
+    # per-iteration varReplace() calls in the original implementation, which
+    # created a new list on every operator application.
+    resolved = [v(data) if callable(v) else v for v in varStack]
+    vi       = 0
+    n_res    = len(resolved)
+
     for op in op_list:
         if callable(op):
-            patt=getArity(op)
-            while patt>len(stack3):
-                stack3.append(var_list[var_idx])
-                var_idx+=1
-            args=varReplace(stack3[-patt:],data)
+            patt  = getArity(op)
+            s_len = len(stack3)
+            while patt > s_len:
+                stack3.append(resolved[vi])
+                vi    += 1
+                s_len += 1
+            args = stack3[-patt:]
             del stack3[-patt:]
             try:
-                temp=op(*args)
+                stack3.append(op(*args))
             except TypeError:
-                print("stack3: ",list(reversed(stack3))," patt: ",patt," data: ",data)
-                temp=np.nan
+                stack3.append(np.nan)
             except OverflowError:
-                temp=np.nan
-            stack3.append(temp)
-        else:
-            if var_idx<len(var_list):
-                stack3.append(varReplace([var_list[var_idx]],data)[0])
-                var_idx+=1
+                stack3.append(np.nan)
+        else:  # "pop"
+            if vi < n_res:
+                stack3.append(resolved[vi])
+                vi += 1
 
-    remaining_vars=var_list[var_idx:]
-    result_stack=list(reversed(stack3))
-    return [remaining_vars,[],result_stack]
+    remaining_vars = list(varStack)[vi:]
+    return [remaining_vars, [], list(reversed(stack3))]
 evModHelper.__doc__ = "evModHelper(varStack,opStack,tempStack,data) is a helper function for evaluateGPModel"
 def rmse(model, inputData, response):
     predictions = evaluateGPModel(model, inputData)
