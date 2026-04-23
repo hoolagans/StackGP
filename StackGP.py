@@ -323,9 +323,12 @@ def _model_compile_key(model):
     The key equals after ``copy.deepcopy`` because:
     * ``model[0].tobytes()`` captures the object-pointer bytes of the operator
       array; module-level function objects are singletons with stable ids.
-    * The vars tuple tags each element with ``'v'`` (variable index) or ``'c'``
+    * The vars tuple tags each entry with ``'v'`` (variable index) or ``'c'``
       (numeric constant) so that variable index 0 and constant 0.0 produce
       distinct keys even though ``0 == 0.0`` in Python.
+
+    Note: the key is only valid within a single Python process (function object
+    addresses differ across processes or after pickling).
     """
     vars_key = tuple(
         ('v', int(v.__closure__[0].cell_contents))
@@ -483,7 +486,7 @@ def evModHelper(varStack,opStack,tempStack,data): #Iterative helper function for
     stack3   = list(tempStack)  # working stack
 
     if len(op_list) == 0:
-        return [list(varStack), [], list(varStack)]
+        return [stack3, [], list(varStack)]
 
     # Pre-resolve all variable selectors once upfront.  This replaces the
     # per-iteration varReplace() calls in the original implementation, which
