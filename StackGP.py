@@ -23,8 +23,10 @@ from sympy import symbols, simplify, expand, lambdify
 import sympy as sym
 try:
     from IPython.display import display, clear_output
-except:
-    pass
+    import ipywidgets as widgets
+    _WIDGETS_AVAILABLE = True
+except ImportError:
+    _WIDGETS_AVAILABLE = False
 
 import signal #for timing out functions
 from contextlib import contextmanager #for timing out functions
@@ -809,9 +811,19 @@ def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=def
     models=models+initialPop
     startTime=time.perf_counter()
     bestFits=[]
+    _terminate_flag = [False]
     if liveTracking:
         fig, ax = plt.subplots(figsize=(20,10))
         ckTime=time.perf_counter()
+        if _WIDGETS_AVAILABLE:
+            _terminate_btn = widgets.Button(description="Terminate Run", button_style='danger', icon='stop')
+            def _on_terminate(b):
+                _terminate_flag[0] = True
+                b.description = "Terminating..."
+                b.disabled = True
+            _terminate_btn.on_click(_on_terminate)
+        else:
+            _terminate_btn = None
     for i in range(generations):
         if capTime and time.perf_counter()-startTime>timeLimit:
             break
@@ -840,9 +852,14 @@ def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=def
             ax.set_ylabel("Fitness")
             clear_output(wait=True) 
             display(fig)    
+            if _terminate_btn is not None:
+                display(_terminate_btn)
             #plt.show()        
             plt.close(fig)
-            ckTime=time.perf_counter()        
+            ckTime=time.perf_counter()
+        if _terminate_flag[0]:
+            print(f"Run terminated by user at generation {i+1}.")
+            break
 
         #paretoModels=paretoTournament(models)
         paretoModels=selectModels(models,elitismRate/100*popSize if elitismRate/100*popSize<len(models) else len(models))
@@ -1432,6 +1449,15 @@ def parallelEvolve(*args,n_jobs=-1,avail_cores=-1, cascades=False, cascadeCount=
         if liveTracking:
                 fig, ax = plt.subplots(figsize=(20,10))
                 kwargs["returnTracking"]=True
+                _terminate_flag = [False]
+                _terminate_btn = None
+                if _WIDGETS_AVAILABLE:
+                    _terminate_btn = widgets.Button(description="Terminate Run", button_style='danger', icon='stop')
+                    def _on_terminate(b):
+                        _terminate_flag[0] = True
+                        b.description = "Terminating..."
+                        b.disabled = True
+                    _terminate_btn.on_click(_on_terminate)
         argList = [copy.deepcopy(kwargs) for _ in range(n_jobs)]
         for i in range(n_jobs):
             argList[i]["tracking"]=False
@@ -1459,8 +1485,13 @@ def parallelEvolve(*args,n_jobs=-1,avail_cores=-1, cascades=False, cascadeCount=
                     if n_jobs <= 16:  # Only show legend if there are a reasonable number of jobs
                         ax.legend()
                     clear_output(wait=True) 
-                    display(fig)       
+                    display(fig)
+                    if _terminate_btn is not None:
+                        display(_terminate_btn)
                     plt.close(fig)
+            if liveTracking and _terminate_flag[0]:
+                print(f"Run terminated by user after cascade {cs+1}.")
+                break
             if capTime: 
                 for i in range(n_jobs):
                     argList[i]["timeLimit"]=kwargs["timeLimit"]-(time.perf_counter()-startTime)
