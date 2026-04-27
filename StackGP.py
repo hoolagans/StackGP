@@ -817,13 +817,16 @@ def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=def
         ckTime=time.perf_counter()
         if _WIDGETS_AVAILABLE:
             _terminate_btn = widgets.Button(description="Terminate Run", button_style='danger', icon='stop')
+            _plot_out = widgets.Output()
             def _on_terminate(b):
                 _terminate_flag[0] = True
                 b.description = "Terminating..."
                 b.disabled = True
             _terminate_btn.on_click(_on_terminate)
+            display(widgets.VBox([_plot_out, _terminate_btn]))
         else:
             _terminate_btn = None
+            _plot_out = None
     for i in range(generations):
         if capTime and time.perf_counter()-startTime>timeLimit:
             break
@@ -850,10 +853,13 @@ def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=def
             ax.set_title(f"Best Model: {bestFits[-1]:.2f} at Generation {(i+1)}")
             ax.set_xlabel("Generations")
             ax.set_ylabel("Fitness")
-            clear_output(wait=True) 
-            display(fig)    
-            if _terminate_btn is not None:
-                display(_terminate_btn)
+            if _plot_out is not None:
+                with _plot_out:
+                    clear_output(wait=True)
+                    display(fig)
+            else:
+                clear_output(wait=True)
+                display(fig)
             #plt.show()        
             plt.close(fig)
             ckTime=time.perf_counter()
@@ -1451,13 +1457,16 @@ def parallelEvolve(*args,n_jobs=-1,avail_cores=-1, cascades=False, cascadeCount=
                 kwargs["returnTracking"]=True
                 _terminate_flag = [False]
                 _terminate_btn = None
+                _plot_out = None
                 if _WIDGETS_AVAILABLE:
                     _terminate_btn = widgets.Button(description="Terminate Run", button_style='danger', icon='stop')
+                    _plot_out = widgets.Output()
                     def _on_terminate(b):
                         _terminate_flag[0] = True
                         b.description = "Terminating..."
                         b.disabled = True
                     _terminate_btn.on_click(_on_terminate)
+                    display(widgets.VBox([_plot_out, _terminate_btn]))
         argList = [copy.deepcopy(kwargs) for _ in range(n_jobs)]
         for i in range(n_jobs):
             argList[i]["tracking"]=False
@@ -1484,10 +1493,13 @@ def parallelEvolve(*args,n_jobs=-1,avail_cores=-1, cascades=False, cascadeCount=
                     ax.set_ylabel("Fitness")
                     if n_jobs <= 16:  # Only show legend if there are a reasonable number of jobs
                         ax.legend()
-                    clear_output(wait=True) 
-                    display(fig)
-                    if _terminate_btn is not None:
-                        display(_terminate_btn)
+                    if _plot_out is not None:
+                        with _plot_out:
+                            clear_output(wait=True)
+                            display(fig)
+                    else:
+                        clear_output(wait=True)
+                        display(fig)
                     plt.close(fig)
             if liveTracking and _terminate_flag[0]:
                 print(f"Run terminated by user after cascade {cs+1}.")
