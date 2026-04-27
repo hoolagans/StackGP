@@ -7,6 +7,7 @@ import numpy as np
 import math
 import copy
 import sys
+import asyncio
 import pandas as pd
 from scipy.stats import pearsonr # for computing correlation
 from functools import reduce, cache #for flattening lists and caching
@@ -862,6 +863,14 @@ def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=def
                 display(fig)
             #plt.show()        
             plt.close(fig)
+            # If we are running on the event-loop thread (IPython autoawait /
+            # VS Code), process one loop iteration so pending widget comm
+            # messages (e.g. the terminate button click) can fire now rather
+            # than being deferred until after the cell finishes.
+            try:
+                asyncio.get_running_loop()._run_once()
+            except RuntimeError:
+                pass  # not on the event-loop thread; IOLoop is already free
             ckTime=time.perf_counter()
         if _terminate_flag[0]:
             print(f"Run terminated by user at generation {i+1}.")
@@ -1501,6 +1510,12 @@ def parallelEvolve(*args,n_jobs=-1,avail_cores=-1, cascades=False, cascadeCount=
                         clear_output(wait=True)
                         display(fig)
                     plt.close(fig)
+                    # Process any pending widget comm messages (e.g. button
+                    # click) before re-entering the cascade loop.
+                    try:
+                        asyncio.get_running_loop()._run_once()
+                    except RuntimeError:
+                        pass
             if liveTracking and _terminate_flag[0]:
                 print(f"Run terminated by user after cascade {cs+1}.")
                 break
