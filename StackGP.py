@@ -784,6 +784,148 @@ def optimizeModel(model, inputData, responseData, bounds=None, **kwargs):
     return newModel
 
 
+def findModelOptima(model, numVars, bounds=None, numOptima=1, maximize=False,
+                    minDistance=None, seed=None, **kwargs):
+    """Find input parameters that extremize the output of a StackGP model.
+
+    Uses ``scipy.optimize.differential_evolution`` as the global search engine.
+    When more than one optimum is requested a repulsion strategy is employed:
+    after each optimum is located a Gaussian penalty is added to the objective
+    function so that subsequent searches are deflected away from already-found
+    regions, ensuring all returned points are separated by at least
+    *minDistance*.
+
+    Parameters
+    ----------
+    model : list
+        A StackGP model ``[ops, vars, quality]``.
+    numVars : int
+        Number of input variables expected by the model.
+    bounds : list of (float, float), optional
+        Search bounds ``[(lo_0, hi_0), (lo_1, hi_1), …]`` for each variable.
+        Defaults to ``[(-10.0, 10.0)]`` for each variable.
+    numOptima : int, optional
+        How many distinct optima to return (default ``1``).
+    maximize : bool, optional
+        If ``True`` maximise the model output; if ``False`` (default) minimise.
+    minDistance : float, optional
+        Minimum Euclidean distance between any two returned optima.  When
+        ``None`` (default) the value is set to 10 % of the mean variable-bound
+        width times ``sqrt(numVars)``.
+    seed : int, optional
+        Random seed for reproducibility.
+    **kwargs
+        Extra keyword arguments forwarded to
+        ``scipy.optimize.differential_evolution``.
+
+    Returns
+    -------
+    list of (numpy.ndarray, float)
+        Each element is a ``(parameters, value)`` pair where *parameters* is a
+        1-D array of length *numVars* and *value* is the corresponding model
+        output.  The list is sorted best-first (smallest for minimisation,
+        largest for maximisation).  Fewer than *numOptima* entries may be
+        returned if insufficient distinct optima were found within the bounds.
+    """
+    if numOptima == 0:
+        return []
+
+    if bounds is None:
+        bounds = [(-10.0, 10.0)] * numVars
+
+    bounds = list(bounds)
+    if len(bounds) != numVars:
+        raise ValueError(
+            f"len(bounds)={len(bounds)} does not match numVars={numVars}"
+        )
+
+    if minDistance is None:
+        widths = [hi - lo for lo, hi in bounds]
+        minDistance = 0.1 * np.mean(widths) * np.sqrt(numVars)
+
+    rng = np.random.default_rng(seed)
+
+    def _eval_point(x):
+        data = np.array([[xi] for xi in x], dtype=float)
+        result = evaluateGPModel(model, data)
+        if isinstance(result, np.ndarray):
+            return float(result[0])
+        return float(result)
+
+    found = []          # list of (x_arr, raw_value)
+    repulsion_height = None
+    max_attempts = max(numOptima * 5, 10)
+
+    for _ in range(max_attempts):
+        if len(found) >= numOptima:
+            break
+
+        rep_height = repulsion_height if repulsion_height is not None else 1e6
+        rep_width = max(minDistance * 0.5, 1e-6)
+        found_snapshot = list(found)
+
+        def _objective(x, _found=found_snapshot, _rh=rep_height, _rw=rep_width):
+            try:
+                val = _eval_point(x)
+            except Exception:
+                return np.inf
+            if not np.isfinite(val):
+                return np.inf
+            obj = -val if maximize else val
+            for opt_x, _ in _found:
+                dist = np.linalg.norm(x - opt_x)
+                obj += _rh * np.exp(-0.5 * (dist / _rw) ** 2)
+            return obj
+
+        run_seed = int(rng.integers(0, 2 ** 31))
+        de_kwargs = {
+            "seed": run_seed,
+            "maxiter": 1000,
+            "tol": 1e-7,
+            "polish": True,
+        }
+        de_kwargs.update(kwargs)
+
+        try:
+            result = differential_evolution(_objective, bounds, **de_kwargs)
+        except Exception:
+            continue
+
+        x_opt = result.x
+        try:
+            val = _eval_point(x_opt)
+        except Exception:
+            continue
+
+        if not np.isfinite(val):
+            continue
+
+        too_close = any(
+            np.linalg.norm(x_opt - opt_x) < minDistance
+            for opt_x, _ in found
+        )
+        if too_close:
+            continue
+
+        found.append((x_opt, val))
+
+        if repulsion_height is None:
+            repulsion_height = max(abs(val) * 10.0, 1e3)
+
+    if maximize:
+        found.sort(key=lambda item: -item[1])
+    else:
+        found.sort(key=lambda item: item[1])
+
+    return found
+
+
+findModelOptima.__doc__ = (
+    "findModelOptima(model, numVars, bounds, numOptima, maximize, minDistance, seed, **kwargs) "
+    "finds input parameters that extremize a StackGP model's output"
+)
+
+
 def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=defaultConst(), variableNames=[], mutationRate=79, crossoverRate=11, spawnRate=10, extinction=False,extinctionRate=10,elitismRate=10,popSize=300,maxComplexity=100,align=True,initialPop=[],timeLimit=300,capTime=False,tourneySize=5,tracking=False,returnTracking=False,liveTracking=False,liveTrackingInterval=1,modelEvaluationMetrics=[fitness,stackGPModelComplexity],dataSubsample=False,samplingMethod=randomSubsample,alternateObjectives=[],alternateObjFrequency=10,allowEarlyTermination=False,earlyTerminationThreshold=0):
     
     alternatingFlag = False

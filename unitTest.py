@@ -1057,5 +1057,216 @@ class TestEdgeCases(unittest.TestCase):
             pass  # acceptable
 
 
+# ---------------------------------------------------------------------------
+# 21. findModelOptima
+# ---------------------------------------------------------------------------
+
+class TestFindModelOptima(unittest.TestCase):
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _sqrd_model():
+        """ops=[sqrd], vars=[x0] → x0^2"""
+        ops = np.array([sgp.sqrd], dtype=object)
+        var = [sgp.variableSelect(0)]
+        return [ops, var, []]
+
+    @staticmethod
+    def _cos_model():
+        """ops=[cos], vars=[x0] → cos(x0)"""
+        ops = np.array([sgp.cos], dtype=object)
+        var = [sgp.variableSelect(0)]
+        return [ops, var, []]
+
+    # ------------------------------------------------------------------
+    # Basic return-type checks
+    # ------------------------------------------------------------------
+
+    def test_returns_list(self):
+        result = sgp.findModelOptima(self._sqrd_model(), numVars=1,
+                                     bounds=[(-5.0, 5.0)], numOptima=1, seed=0)
+        self.assertIsInstance(result, list)
+
+    def test_returns_correct_length(self):
+        result = sgp.findModelOptima(self._sqrd_model(), numVars=1,
+                                     bounds=[(-5.0, 5.0)], numOptima=1, seed=0)
+        self.assertEqual(len(result), 1)
+
+    def test_result_element_is_pair(self):
+        result = sgp.findModelOptima(self._sqrd_model(), numVars=1,
+                                     bounds=[(-5.0, 5.0)], numOptima=1, seed=0)
+        self.assertEqual(len(result[0]), 2)
+
+    def test_parameters_is_ndarray(self):
+        result = sgp.findModelOptima(self._sqrd_model(), numVars=1,
+                                     bounds=[(-5.0, 5.0)], numOptima=1, seed=0)
+        self.assertIsInstance(result[0][0], np.ndarray)
+
+    def test_value_is_float(self):
+        result = sgp.findModelOptima(self._sqrd_model(), numVars=1,
+                                     bounds=[(-5.0, 5.0)], numOptima=1, seed=0)
+        self.assertIsInstance(result[0][1], float)
+
+    def test_parameters_length_matches_numvars(self):
+        model = simple_model()  # 2-variable model
+        result = sgp.findModelOptima(model, numVars=2,
+                                     bounds=[(-5.0, 5.0), (-5.0, 5.0)],
+                                     numOptima=1, seed=0)
+        self.assertEqual(len(result[0][0]), 2)
+
+    def test_zero_optima_returns_empty(self):
+        result = sgp.findModelOptima(self._sqrd_model(), numVars=1,
+                                     bounds=[(-5.0, 5.0)], numOptima=0)
+        self.assertEqual(result, [])
+
+    # ------------------------------------------------------------------
+    # Minimisation correctness
+    # ------------------------------------------------------------------
+
+    def test_minimize_quadratic_value_near_zero(self):
+        """Minimum of x^2 on [-5, 5] is 0 at x=0."""
+        result = sgp.findModelOptima(self._sqrd_model(), numVars=1,
+                                     bounds=[(-5.0, 5.0)], numOptima=1,
+                                     maximize=False, seed=42)
+        self.assertEqual(len(result), 1)
+        x_opt, val = result[0]
+        self.assertAlmostEqual(val, 0.0, places=4)
+        self.assertAlmostEqual(x_opt[0], 0.0, places=2)
+
+    def test_minimize_linear_at_lower_bound(self):
+        """Minimum of 2*x0 on [-3, 3] is at x0=-3."""
+        result = sgp.findModelOptima(linear_model(), numVars=1,
+                                     bounds=[(-3.0, 3.0)], numOptima=1,
+                                     maximize=False, seed=0)
+        self.assertEqual(len(result), 1)
+        x_opt, val = result[0]
+        self.assertAlmostEqual(x_opt[0], -3.0, places=1)
+        self.assertAlmostEqual(val, -6.0, places=1)
+
+    def test_minimize_two_variable_at_lower_bounds(self):
+        """Minimum of x0+x1 on [-5,5]^2 is at (-5,-5), value=-10."""
+        result = sgp.findModelOptima(simple_model(), numVars=2,
+                                     bounds=[(-5.0, 5.0), (-5.0, 5.0)],
+                                     numOptima=1, maximize=False, seed=1)
+        self.assertEqual(len(result), 1)
+        x_opt, val = result[0]
+        self.assertAlmostEqual(val, -10.0, places=1)
+        self.assertAlmostEqual(x_opt[0], -5.0, places=1)
+        self.assertAlmostEqual(x_opt[1], -5.0, places=1)
+
+    # ------------------------------------------------------------------
+    # Maximisation correctness
+    # ------------------------------------------------------------------
+
+    def test_maximize_quadratic_value_near_25(self):
+        """Maximum of x^2 on [-5, 5] is 25 at |x|=5."""
+        result = sgp.findModelOptima(self._sqrd_model(), numVars=1,
+                                     bounds=[(-5.0, 5.0)], numOptima=1,
+                                     maximize=True, seed=42)
+        self.assertEqual(len(result), 1)
+        x_opt, val = result[0]
+        self.assertAlmostEqual(val, 25.0, places=1)
+        self.assertAlmostEqual(abs(x_opt[0]), 5.0, places=1)
+
+    def test_maximize_linear_at_upper_bound(self):
+        """Maximum of 2*x0 on [-3, 3] is at x0=3."""
+        result = sgp.findModelOptima(linear_model(), numVars=1,
+                                     bounds=[(-3.0, 3.0)], numOptima=1,
+                                     maximize=True, seed=0)
+        self.assertEqual(len(result), 1)
+        x_opt, val = result[0]
+        self.assertAlmostEqual(x_opt[0], 3.0, places=1)
+        self.assertAlmostEqual(val, 6.0, places=1)
+
+    # ------------------------------------------------------------------
+    # Best-first ordering
+    # ------------------------------------------------------------------
+
+    def test_minimize_sorted_ascending(self):
+        """Returned list should be sorted best (lowest) first."""
+        result = sgp.findModelOptima(self._cos_model(), numVars=1,
+                                     bounds=[(-10.0, 10.0)], numOptima=2,
+                                     maximize=False, seed=7)
+        if len(result) == 2:
+            self.assertLessEqual(result[0][1], result[1][1])
+
+    def test_maximize_sorted_descending(self):
+        """Returned list should be sorted best (highest) first."""
+        result = sgp.findModelOptima(self._cos_model(), numVars=1,
+                                     bounds=[(-10.0, 10.0)], numOptima=2,
+                                     maximize=True, seed=7)
+        if len(result) == 2:
+            self.assertGreaterEqual(result[0][1], result[1][1])
+
+    # ------------------------------------------------------------------
+    # Multiple distinct optima
+    # ------------------------------------------------------------------
+
+    def test_multiple_optima_count(self):
+        """Should return up to numOptima results for cos(x)."""
+        result = sgp.findModelOptima(self._cos_model(), numVars=1,
+                                     bounds=[(-10.0, 10.0)], numOptima=2,
+                                     maximize=False, seed=7)
+        self.assertGreater(len(result), 0)
+        self.assertLessEqual(len(result), 2)
+
+    def test_multiple_optima_distinct_min_distance(self):
+        """Two returned optima must be at least minDistance apart."""
+        min_d = 4.0
+        result = sgp.findModelOptima(self._cos_model(), numVars=1,
+                                     bounds=[(-10.0, 10.0)], numOptima=2,
+                                     maximize=False, minDistance=min_d, seed=3)
+        if len(result) == 2:
+            dist = float(np.linalg.norm(result[0][0] - result[1][0]))
+            self.assertGreaterEqual(dist, min_d)
+
+    def test_multiple_minima_of_cos_near_minus_one(self):
+        """Both returned minima of cos(x) should have value close to -1."""
+        result = sgp.findModelOptima(self._cos_model(), numVars=1,
+                                     bounds=[(-10.0, 10.0)], numOptima=2,
+                                     maximize=False, seed=7)
+        for _, val in result:
+            self.assertAlmostEqual(val, -1.0, places=2)
+
+    # ------------------------------------------------------------------
+    # Bounds and default-bounds behaviour
+    # ------------------------------------------------------------------
+
+    def test_default_bounds_runs_without_error(self):
+        """Should run with default bounds (no bounds argument)."""
+        result = sgp.findModelOptima(self._sqrd_model(), numVars=1, seed=1)
+        self.assertGreater(len(result), 0)
+
+    def test_bounds_respected_lower(self):
+        """Minimum of x^2 is 0, but if bounds are [2, 5] minimum must be >= 4."""
+        result = sgp.findModelOptima(self._sqrd_model(), numVars=1,
+                                     bounds=[(2.0, 5.0)], numOptima=1,
+                                     maximize=False, seed=0)
+        self.assertEqual(len(result), 1)
+        x_opt, val = result[0]
+        self.assertGreaterEqual(x_opt[0], 2.0 - 1e-6)
+        self.assertLessEqual(x_opt[0], 5.0 + 1e-6)
+
+    # ------------------------------------------------------------------
+    # Error handling
+    # ------------------------------------------------------------------
+
+    def test_bounds_length_mismatch_raises(self):
+        """Providing wrong number of bounds must raise ValueError."""
+        with self.assertRaises(ValueError):
+            sgp.findModelOptima(self._sqrd_model(), numVars=2,
+                                bounds=[(-5.0, 5.0)])
+
+    def test_result_length_never_exceeds_numoptima(self):
+        """Should never return more optima than requested."""
+        result = sgp.findModelOptima(self._cos_model(), numVars=1,
+                                     bounds=[(-10.0, 10.0)], numOptima=3,
+                                     maximize=False, seed=5)
+        self.assertLessEqual(len(result), 3)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
