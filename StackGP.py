@@ -854,7 +854,12 @@ def findModelOptima(model, numVars, bounds=None, numOptima=1, maximize=False,
 
     found = []          # list of (x_arr, raw_value)
     repulsion_height = None
-    max_attempts = max(numOptima * 5, 10)
+    # Allow at least 5 attempts per requested optimum so the repulsion strategy
+    # has a reasonable number of restarts to locate diverse regions; the floor
+    # of 10 ensures adequate exploration even when numOptima is small.
+    _ATTEMPTS_PER_OPTIMUM = 5
+    _MIN_ATTEMPTS = 10
+    max_attempts = max(numOptima * _ATTEMPTS_PER_OPTIMUM, _MIN_ATTEMPTS)
 
     for _ in range(max_attempts):
         if len(found) >= numOptima:
@@ -910,6 +915,9 @@ def findModelOptima(model, numVars, bounds=None, numOptima=1, maximize=False,
         found.append((x_opt, val))
 
         if repulsion_height is None:
+            # Scale repulsion to be an order of magnitude larger than the
+            # objective value so found optima become strongly unattractive to
+            # the next search attempt.
             repulsion_height = max(abs(val) * 10.0, 1e3)
 
     if maximize:
@@ -918,12 +926,6 @@ def findModelOptima(model, numVars, bounds=None, numOptima=1, maximize=False,
         found.sort(key=lambda item: item[1])
 
     return found
-
-
-findModelOptima.__doc__ = (
-    "findModelOptima(model, numVars, bounds, numOptima, maximize, minDistance, seed, **kwargs) "
-    "finds input parameters that extremize a StackGP model's output"
-)
 
 
 def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=defaultConst(), variableNames=[], mutationRate=79, crossoverRate=11, spawnRate=10, extinction=False,extinctionRate=10,elitismRate=10,popSize=300,maxComplexity=100,align=True,initialPop=[],timeLimit=300,capTime=False,tourneySize=5,tracking=False,returnTracking=False,liveTracking=False,liveTrackingInterval=1,modelEvaluationMetrics=[fitness,stackGPModelComplexity],dataSubsample=False,samplingMethod=randomSubsample,alternateObjectives=[],alternateObjFrequency=10,allowEarlyTermination=False,earlyTerminationThreshold=0):
