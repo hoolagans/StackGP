@@ -1,0 +1,13 @@
+# Core StackGP dependencies
+numpy
+pandas
+scipy
+scikit-learn
+sympy
+joblib
+matplotlib
+dill
+
+# Web API
+flask
+flask-cors

@@ -1,0 +1,844 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>StackGP — Evolution Interface</title>
+
+  <!-- Bootstrap 5 -->
+  <link
+    href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+    rel="stylesheet"
+  />
+  <!-- Bootstrap Icons -->
+  <link
+    href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css"
+    rel="stylesheet"
+  />
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+
+  <style>
+    :root {
+      --brand: #5c6bc0;
+      --brand-dark: #3949ab;
+    }
+    body { background: #f5f6fa; }
+    .navbar-brand { font-weight: 700; letter-spacing: .05em; }
+    .section-card {
+      border: none;
+      border-radius: .75rem;
+      box-shadow: 0 2px 8px rgba(0,0,0,.08);
+      margin-bottom: 1.5rem;
+    }
+    .section-card .card-header {
+      background: var(--brand);
+      color: #fff;
+      border-radius: .75rem .75rem 0 0;
+      font-weight: 600;
+      padding: .65rem 1.25rem;
+    }
+    .section-number {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 1.6rem; height: 1.6rem;
+      background: rgba(255,255,255,.25);
+      border-radius: 50%;
+      font-size: .8rem; font-weight: 700;
+      margin-right: .5rem;
+    }
+    #trackingChart { max-height: 320px; }
+    #plotImg { max-width: 100%; border-radius: .5rem; display: none; }
+    .model-table th { background: #e8eaf6; }
+    .status-badge { font-size: .75rem; }
+    #runBtn { min-width: 180px; }
+    .preview-table { font-size: .8rem; }
+    .preview-table td, .preview-table th { padding: .2rem .5rem; }
+    .spinner-wrap { display: none; }
+    .spinner-wrap.active { display: inline-block; }
+  </style>
+</head>
+<body>
+
+<!-- ─── Navbar ─────────────────────────────────────────────────────────── -->
+<nav class="navbar navbar-dark" style="background:var(--brand-dark);">
+  <div class="container-fluid">
+    <span class="navbar-brand"><i class="bi bi-cpu me-2"></i>StackGP Evolution Interface</span>
+    <span id="statusBadge" class="badge bg-secondary status-badge">Idle</span>
+  </div>
+</nav>
+
+<div class="container-xl py-4">
+
+  <!-- ─── 1. Dataset ──────────────────────────────────────────────────── -->
+  <div class="card section-card">
+    <div class="card-header">
+      <span class="section-number">1</span>Dataset
+    </div>
+    <div class="card-body">
+      <div class="row g-3 align-items-end">
+        <!-- Upload new -->
+        <div class="col-md-5">
+          <label class="form-label fw-semibold">Upload CSV</label>
+          <div class="input-group">
+            <input type="file" class="form-control" id="csvFile" accept=".csv" />
+            <button class="btn btn-primary" id="uploadBtn">
+              <i class="bi bi-upload me-1"></i>Upload
+            </button>
+          </div>
+        </div>
+        <!-- Or pick existing -->
+        <div class="col-md-3">
+          <label class="form-label fw-semibold">or load existing</label>
+          <select class="form-select" id="existingDataset">
+            <option value="">— select —</option>
+          </select>
+        </div>
+        <!-- Response column -->
+        <div class="col-md-3">
+          <label class="form-label fw-semibold">Response column</label>
+          <select class="form-select" id="responseCol" disabled>
+            <option value="">— upload first —</option>
+          </select>
+        </div>
+        <div class="col-md-1 text-end">
+          <button class="btn btn-outline-secondary btn-sm" id="previewToggle" disabled>
+            <i class="bi bi-table"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Data info row -->
+      <div id="dataInfo" class="mt-2 text-muted small" style="display:none"></div>
+
+      <!-- Preview table -->
+      <div id="previewContainer" class="mt-3" style="display:none">
+        <div class="table-responsive">
+          <table id="previewTable" class="table table-sm table-bordered preview-table mb-0"></table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── 2. Settings ─────────────────────────────────────────────────── -->
+  <div class="card section-card">
+    <div class="card-header">
+      <span class="section-number">2</span>Evolution Settings
+    </div>
+    <div class="card-body">
+
+      <!-- Method toggle -->
+      <div class="row mb-3">
+        <div class="col-md-4">
+          <label class="form-label fw-semibold">Evolution method</label>
+          <select class="form-select" id="evolveMethod">
+            <option value="evolve">evolve (single-process)</option>
+            <option value="parallelEvolve">parallelEvolve (multi-core)</option>
+          </select>
+        </div>
+        <!-- Parallel-only settings (hidden by default) -->
+        <div class="col-md-2" id="nJobsGroup" style="display:none">
+          <label class="form-label fw-semibold">n_jobs</label>
+          <input type="number" class="form-control" id="nJobs" value="-1" min="-1" />
+        </div>
+        <div class="col-md-3" id="cascadesGroup" style="display:none">
+          <label class="form-label fw-semibold">Cascades</label>
+          <div class="input-group">
+            <div class="input-group-text">
+              <input type="checkbox" id="cascades" />
+            </div>
+            <input type="number" class="form-control" id="cascadeCount" value="10" placeholder="Count" />
+          </div>
+        </div>
+        <div class="col-md-2" id="exchangeGroup" style="display:none">
+          <label class="form-label fw-semibold">Exchange</label>
+          <input type="number" class="form-control" id="exchangeCount" value="5" />
+        </div>
+      </div>
+
+      <div class="row g-3">
+        <!-- Operator set -->
+        <div class="col-md-3 col-sm-6">
+          <label class="form-label fw-semibold">Operator set</label>
+          <select class="form-select" id="ops">
+            <option value="defaultOps">defaultOps</option>
+            <option value="allOps">allOps</option>
+            <option value="booleanOps">booleanOps</option>
+          </select>
+        </div>
+        <!-- Constant set -->
+        <div class="col-md-3 col-sm-6">
+          <label class="form-label fw-semibold">Constant set</label>
+          <select class="form-select" id="const">
+            <option value="defaultConst">defaultConst</option>
+            <option value="booleanConst">booleanConst</option>
+          </select>
+        </div>
+        <!-- Sampling method -->
+        <div class="col-md-3 col-sm-6">
+          <label class="form-label fw-semibold">Sampling method</label>
+          <select class="form-select" id="samplingMethod">
+            <option value="randomSubsample">randomSubsample</option>
+            <option value="generationProportionalSample">generationProportionalSample</option>
+            <option value="ordinalSample">ordinalSample</option>
+            <option value="orderedSample">orderedSample</option>
+            <option value="ordinalBalancedSample">ordinalBalancedSample</option>
+            <option value="balancedSample">balancedSample</option>
+          </select>
+        </div>
+        <!-- Data subsampling -->
+        <div class="col-md-3 col-sm-6 d-flex align-items-end">
+          <div class="form-check form-switch ms-2">
+            <input class="form-check-input" type="checkbox" id="dataSubsample" />
+            <label class="form-check-label" for="dataSubsample">Data subsampling</label>
+          </div>
+        </div>
+
+        <!-- Generations -->
+        <div class="col-md-2 col-sm-4">
+          <label class="form-label fw-semibold">Generations</label>
+          <input type="number" class="form-control" id="generations" value="100" min="1" />
+        </div>
+        <!-- Pop size -->
+        <div class="col-md-2 col-sm-4">
+          <label class="form-label fw-semibold">Population size</label>
+          <input type="number" class="form-control" id="popSize" value="300" min="10" />
+        </div>
+        <!-- Max complexity -->
+        <div class="col-md-2 col-sm-4">
+          <label class="form-label fw-semibold">Max complexity</label>
+          <input type="number" class="form-control" id="maxComplexity" value="100" min="1" />
+        </div>
+        <!-- Mutation rate -->
+        <div class="col-md-2 col-sm-4">
+          <label class="form-label fw-semibold">Mutation rate %</label>
+          <input type="number" class="form-control" id="mutationRate" value="79" min="0" max="100" />
+        </div>
+        <!-- Crossover rate -->
+        <div class="col-md-2 col-sm-4">
+          <label class="form-label fw-semibold">Crossover rate %</label>
+          <input type="number" class="form-control" id="crossoverRate" value="11" min="0" max="100" />
+        </div>
+        <!-- Spawn rate -->
+        <div class="col-md-2 col-sm-4">
+          <label class="form-label fw-semibold">Spawn rate %</label>
+          <input type="number" class="form-control" id="spawnRate" value="10" min="0" max="100" />
+        </div>
+
+        <!-- Elitism rate -->
+        <div class="col-md-2 col-sm-4">
+          <label class="form-label fw-semibold">Elitism rate %</label>
+          <input type="number" class="form-control" id="elitismRate" value="10" min="0" max="100" />
+        </div>
+        <!-- Tournament size -->
+        <div class="col-md-2 col-sm-4">
+          <label class="form-label fw-semibold">Tournament size</label>
+          <input type="number" class="form-control" id="tourneySize" value="5" min="2" />
+        </div>
+        <!-- Time limit -->
+        <div class="col-md-2 col-sm-4">
+          <label class="form-label fw-semibold">Time limit (s)</label>
+          <input type="number" class="form-control" id="timeLimit" value="300" min="1" />
+        </div>
+        <!-- Cap time -->
+        <div class="col-md-2 col-sm-4 d-flex align-items-end">
+          <div class="form-check form-switch ms-2">
+            <input class="form-check-input" type="checkbox" id="capTime" />
+            <label class="form-check-label" for="capTime">Cap time</label>
+          </div>
+        </div>
+        <!-- Align -->
+        <div class="col-md-2 col-sm-4 d-flex align-items-end">
+          <div class="form-check form-switch ms-2">
+            <input class="form-check-input" type="checkbox" id="align" checked />
+            <label class="form-check-label" for="align">Align constants</label>
+          </div>
+        </div>
+
+        <!-- Extinction -->
+        <div class="col-md-2 col-sm-4 d-flex align-items-end">
+          <div class="form-check form-switch ms-2">
+            <input class="form-check-input" type="checkbox" id="extinction" />
+            <label class="form-check-label" for="extinction">Extinction</label>
+          </div>
+        </div>
+        <div class="col-md-2 col-sm-4">
+          <label class="form-label fw-semibold">Extinction rate</label>
+          <input type="number" class="form-control" id="extinctionRate" value="10" min="1" />
+        </div>
+
+        <!-- Live tracking interval -->
+        <div class="col-md-2 col-sm-4">
+          <label class="form-label fw-semibold">Update interval (gens)</label>
+          <input type="number" class="form-control" id="liveTrackingInterval" value="10" min="1"
+                 title="Generations per live-tracking batch" />
+        </div>
+
+        <!-- Early termination -->
+        <div class="col-md-2 col-sm-4 d-flex align-items-end">
+          <div class="form-check form-switch ms-2">
+            <input class="form-check-input" type="checkbox" id="allowEarlyTermination" />
+            <label class="form-check-label" for="allowEarlyTermination">Early stop</label>
+          </div>
+        </div>
+        <div class="col-md-2 col-sm-4">
+          <label class="form-label fw-semibold">Early stop threshold</label>
+          <input type="number" class="form-control" id="earlyTerminationThreshold" value="0" step="0.001" />
+        </div>
+      </div>
+
+      <!-- Seed population -->
+      <div class="row mt-3">
+        <div class="col-md-4">
+          <label class="form-label fw-semibold"><i class="bi bi-seed me-1"></i>Seed population from saved model set</label>
+          <select class="form-select" id="seedModels">
+            <option value="">— none (fresh start) —</option>
+          </select>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ─── 3. Run ──────────────────────────────────────────────────────── -->
+  <div class="text-center mb-4">
+    <button class="btn btn-success btn-lg px-5" id="runBtn" disabled>
+      <span class="spinner-wrap" id="runSpinner">
+        <span class="spinner-border spinner-border-sm me-2"></span>
+      </span>
+      <i class="bi bi-play-circle me-2" id="runIcon"></i>
+      <span id="runBtnText">Run Evolution</span>
+    </button>
+    <button class="btn btn-outline-danger btn-lg ms-2 d-none" id="cancelBtn">
+      <i class="bi bi-stop-circle me-1"></i>Cancel
+    </button>
+  </div>
+
+  <!-- ─── 4. Live Tracking ─────────────────────────────────────────────── -->
+  <div class="card section-card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <span><span class="section-number">3</span>Live Tracking</span>
+      <small id="trackingStatus" class="opacity-75">Waiting for evolution…</small>
+    </div>
+    <div class="card-body">
+      <canvas id="trackingChart"></canvas>
+    </div>
+  </div>
+
+  <!-- ─── 5. Results ──────────────────────────────────────────────────── -->
+  <div class="card section-card">
+    <div class="card-header">
+      <span class="section-number">4</span>Results &amp; Model Sets
+    </div>
+    <div class="card-body">
+
+      <!-- Save current models -->
+      <div class="row g-2 align-items-end mb-3">
+        <div class="col-auto">
+          <label class="form-label fw-semibold mb-1">Save current models as</label>
+          <div class="input-group">
+            <input type="text" class="form-control" id="saveModelName" placeholder="model_set_name" />
+            <button class="btn btn-primary" id="saveBtn" disabled>
+              <i class="bi bi-floppy me-1"></i>Save
+            </button>
+          </div>
+        </div>
+        <div class="col-auto text-muted small" id="saveMsg"></div>
+      </div>
+
+      <!-- Top models table -->
+      <div class="table-responsive">
+        <table class="table table-sm table-hover model-table" id="modelsTable">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Expression</th>
+              <th>R²</th>
+              <th>RMSE</th>
+              <th>Complexity</th>
+            </tr>
+          </thead>
+          <tbody id="modelsBody">
+            <tr><td colspan="5" class="text-center text-muted">No models yet — run evolution first.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── 6. Model Explorer ────────────────────────────────────────────── -->
+  <div class="card section-card">
+    <div class="card-header">
+      <span class="section-number">5</span>Model Explorer
+    </div>
+    <div class="card-body">
+      <div class="row g-3 align-items-end">
+
+        <!-- Model set source -->
+        <div class="col-md-3">
+          <label class="form-label fw-semibold">Model set</label>
+          <select class="form-select" id="explorerModelSource">
+            <option value="current">Current job (latest run)</option>
+          </select>
+        </div>
+
+        <!-- Plot type -->
+        <div class="col-md-3">
+          <label class="form-label fw-semibold">Plot type</label>
+          <select class="form-select" id="plotType">
+            <optgroup label="Population-level">
+              <option value="plotModels">plotModels (Pareto front)</option>
+              <option value="plotModelComplexityDistribution">Complexity distribution</option>
+              <option value="plotModelAccuracyDistribution">Accuracy distribution</option>
+              <option value="plotVariablePresence">Variable presence</option>
+              <option value="plotOperatorPresence">Operator presence</option>
+            </optgroup>
+            <optgroup label="Per-model (requires dataset)">
+              <option value="plotModelResponseComparison">Response comparison</option>
+              <option value="plotPredictionResponseCorrelation">Prediction vs response</option>
+              <option value="plotModelResiduals">Residuals</option>
+              <option value="plotModelResidualDistribution">Residual distribution</option>
+            </optgroup>
+          </select>
+        </div>
+
+        <!-- Model index (per-model plots) -->
+        <div class="col-md-2" id="modelIndexGroup">
+          <label class="form-label fw-semibold">Model #</label>
+          <input type="number" class="form-control" id="modelIndex" value="0" min="0" />
+        </div>
+
+        <!-- Generate button -->
+        <div class="col-md-2">
+          <button class="btn btn-primary w-100" id="plotBtn">
+            <span class="spinner-wrap" id="plotSpinner">
+              <span class="spinner-border spinner-border-sm me-1"></span>
+            </span>
+            <i class="bi bi-bar-chart-line me-1"></i>Generate
+          </button>
+        </div>
+
+      </div>
+
+      <!-- Plot output -->
+      <div class="mt-3 text-center">
+        <img id="plotImg" alt="Generated plot" />
+        <div id="plotError" class="text-danger small mt-2" style="display:none"></div>
+        <div id="plotPlaceholder" class="text-muted py-4">
+          <i class="bi bi-image fs-2 d-block mb-2 opacity-25"></i>
+          Select a plot type and click Generate.
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /container -->
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+/* =========================================================================
+   StackGP Frontend — vanilla JS
+   ========================================================================= */
+
+// ── API base URL (auto-detect: same origin when served by Flask)
+const API = window.location.origin;
+
+// ── State
+let state = {
+  datasetName:  null,
+  responseCols: [],
+  currentJobId: null,
+  currentModels: null,   // summary rows from last complete job
+  evtSource:    null,
+};
+
+// ── Chart.js setup
+const ctx = document.getElementById("trackingChart").getContext("2d");
+const trackingChart = new Chart(ctx, {
+  type: "line",
+  data: {
+    labels: [],
+    datasets: [{
+      label: "Best Fitness (1 − R²)",
+      data: [],
+      borderColor: "#5c6bc0",
+      backgroundColor: "rgba(92,107,192,.1)",
+      fill: true,
+      tension: 0.3,
+      pointRadius: 2,
+    }]
+  },
+  options: {
+    animation: false,
+    responsive: true,
+    scales: {
+      x: { title: { display: true, text: "Generation" } },
+      y: { title: { display: true, text: "Fitness (1 − R²)" } },
+    },
+    plugins: { legend: { display: false } },
+  }
+});
+
+// ── Utility helpers
+function setStatus(text, color = "secondary") {
+  const b = document.getElementById("statusBadge");
+  b.textContent = text;
+  b.className = `badge bg-${color} status-badge`;
+}
+function showSpinner(id, show) {
+  document.getElementById(id).classList.toggle("active", show);
+}
+
+// ── Populate dropdowns from API
+async function refreshDatasets() {
+  const res  = await fetch(`${API}/api/datasets`);
+  const list = await res.json();
+  const sel  = document.getElementById("existingDataset");
+  // keep placeholder
+  sel.innerHTML = '<option value="">— select —</option>';
+  list.forEach(n => {
+    const o = document.createElement("option");
+    o.value = n; o.textContent = n;
+    sel.appendChild(o);
+  });
+}
+
+async function refreshModelSets() {
+  const res  = await fetch(`${API}/api/models`);
+  const list = await res.json();
+
+  // Seed dropdown
+  const seedSel = document.getElementById("seedModels");
+  seedSel.innerHTML = '<option value="">— none (fresh start) —</option>';
+  // Explorer source dropdown
+  const exSel = document.getElementById("explorerModelSource");
+  const current = exSel.querySelector('option[value="current"]');
+  exSel.innerHTML = "";
+  exSel.appendChild(current || (() => {
+    const o = document.createElement("option"); o.value = "current"; o.textContent = "Current job (latest run)"; return o;
+  })());
+
+  list.forEach(n => {
+    [seedSel, exSel].forEach(sel => {
+      const o = document.createElement("option");
+      o.value = n; o.textContent = n;
+      sel.appendChild(o);
+    });
+  });
+}
+
+// ── Dataset upload
+document.getElementById("uploadBtn").addEventListener("click", async () => {
+  const file = document.getElementById("csvFile").files[0];
+  if (!file) return alert("Please choose a CSV file first.");
+  const form = new FormData();
+  form.append("file", file);
+  showSpinner("runSpinner", false);
+  setStatus("Uploading…", "info");
+  const res  = await fetch(`${API}/api/upload`, { method: "POST", body: form });
+  const data = await res.json();
+  if (data.error) { alert(data.error); setStatus("Idle"); return; }
+  applyDataset(data);
+  refreshDatasets();
+  setStatus("Idle");
+});
+
+// ── Load existing dataset
+document.getElementById("existingDataset").addEventListener("change", async function () {
+  if (!this.value) return;
+  const res  = await fetch(`${API}/api/datasets/${this.value}`);
+  const data = await res.json();
+  if (data.error) { alert(data.error); return; }
+  applyDataset(data);
+});
+
+function applyDataset(data) {
+  state.datasetName = data.name;
+  // Response column
+  const sel = document.getElementById("responseCol");
+  sel.innerHTML = "";
+  data.columns.forEach(c => {
+    const o = document.createElement("option");
+    o.value = c; o.textContent = c;
+    sel.appendChild(o);
+  });
+  // Default: last column is response
+  sel.value = data.columns[data.columns.length - 1];
+  sel.disabled = false;
+  document.getElementById("previewToggle").disabled = false;
+  document.getElementById("dataInfo").style.display = "";
+  document.getElementById("dataInfo").textContent =
+    `Dataset: ${data.name} | ${data.rows} rows × ${data.columns.length} columns`;
+  renderPreview(data.preview, data.columns);
+  checkRunReady();
+}
+
+function renderPreview(rows, cols) {
+  const table = document.getElementById("previewTable");
+  table.innerHTML = "";
+  const thead = table.createTHead();
+  const hr = thead.insertRow();
+  cols.forEach(c => { const th = document.createElement("th"); th.textContent = c; hr.appendChild(th); });
+  const tbody = table.createTBody();
+  rows.forEach(row => {
+    const tr = tbody.insertRow();
+    cols.forEach(c => { const td = tr.insertCell(); td.textContent = row[c] ?? ""; });
+  });
+}
+
+document.getElementById("previewToggle").addEventListener("click", () => {
+  const c = document.getElementById("previewContainer");
+  c.style.display = c.style.display === "none" ? "" : "none";
+});
+
+// ── Enable run button when dataset is loaded
+function checkRunReady() {
+  document.getElementById("runBtn").disabled = !state.datasetName;
+}
+
+// ── Evolve method toggle: show/hide parallel options
+document.getElementById("evolveMethod").addEventListener("change", function () {
+  const show = this.value === "parallelEvolve";
+  ["nJobsGroup", "cascadesGroup", "exchangeGroup"].forEach(id => {
+    document.getElementById(id).style.display = show ? "" : "none";
+  });
+});
+
+// ── Plot type: show/hide model index
+document.getElementById("plotType").addEventListener("change", function () {
+  const perModel = ["plotModelResponseComparison", "plotPredictionResponseCorrelation",
+                    "plotModelResiduals", "plotModelResidualDistribution"];
+  document.getElementById("modelIndexGroup").style.display =
+    perModel.includes(this.value) ? "" : "none";
+});
+
+// ── Run evolution
+document.getElementById("runBtn").addEventListener("click", startEvolution);
+
+async function startEvolution() {
+  const datasetName = state.datasetName;
+  const responseCol = document.getElementById("responseCol").value;
+  if (!datasetName || !responseCol) return alert("Please load a dataset and choose a response column.");
+
+  const useParallel = document.getElementById("evolveMethod").value === "parallelEvolve";
+
+  const settings = {
+    ops:                       document.getElementById("ops").value,
+    const:                     document.getElementById("const").value,
+    samplingMethod:            document.getElementById("samplingMethod").value,
+    generations:               +document.getElementById("generations").value,
+    popSize:                   +document.getElementById("popSize").value,
+    maxComplexity:             +document.getElementById("maxComplexity").value,
+    mutationRate:              +document.getElementById("mutationRate").value,
+    crossoverRate:             +document.getElementById("crossoverRate").value,
+    spawnRate:                 +document.getElementById("spawnRate").value,
+    elitismRate:               +document.getElementById("elitismRate").value,
+    tourneySize:               +document.getElementById("tourneySize").value,
+    timeLimit:                 +document.getElementById("timeLimit").value,
+    capTime:                   document.getElementById("capTime").checked,
+    align:                     document.getElementById("align").checked,
+    extinction:                document.getElementById("extinction").checked,
+    extinctionRate:            +document.getElementById("extinctionRate").value,
+    dataSubsample:             document.getElementById("dataSubsample").checked,
+    allowEarlyTermination:     document.getElementById("allowEarlyTermination").checked,
+    earlyTerminationThreshold: +document.getElementById("earlyTerminationThreshold").value,
+    liveTrackingInterval:      +document.getElementById("liveTrackingInterval").value,
+    useParallel,
+    n_jobs:                    +document.getElementById("nJobs").value,
+    cascades:                  document.getElementById("cascades").checked,
+    cascadeCount:              +document.getElementById("cascadeCount").value,
+    exchangeCount:             +document.getElementById("exchangeCount").value,
+  };
+
+  const seedModels = document.getElementById("seedModels").value || null;
+
+  // Reset UI
+  resetTrackingChart();
+  clearModelsTable();
+  document.getElementById("runBtn").disabled = true;
+  document.getElementById("cancelBtn").classList.remove("d-none");
+  showSpinner("runSpinner", true);
+  document.getElementById("runIcon").classList.add("d-none");
+  document.getElementById("runBtnText").textContent = "Running…";
+  setStatus("Running", "warning");
+  document.getElementById("trackingStatus").textContent = "Evolution running…";
+
+  // Start job
+  const resp = await fetch(`${API}/api/evolve`, {
+    method:  "POST",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify({ dataset_name: datasetName, response_col: responseCol, settings, seed_models: seedModels }),
+  });
+  const { job_id, error } = await resp.json();
+  if (error) { alert(error); resetRunBtn(); return; }
+
+  state.currentJobId = job_id;
+  openSSE(job_id);
+}
+
+function openSSE(jobId) {
+  if (state.evtSource) state.evtSource.close();
+  const es = new EventSource(`${API}/api/jobs/${jobId}/stream`);
+  state.evtSource = es;
+
+  es.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+
+    if (msg.type === "progress") {
+      updateTrackingChart(msg.tracking, msg.generation, msg.total);
+    }
+    if (msg.type === "complete") {
+      updateTrackingChart(msg.tracking, msg.tracking.length, msg.tracking.length);
+      populateModelsTable(msg.summary);
+      state.currentModels = msg.summary;
+      document.getElementById("saveBtn").disabled = false;
+      setStatus("Complete", "success");
+      document.getElementById("trackingStatus").textContent =
+        `Complete — ${msg.tracking.length} generations`;
+      resetRunBtn();
+      refreshModelSets();
+      es.close();
+    }
+    if (msg.type === "error") {
+      setStatus("Error", "danger");
+      alert("Evolution error:\n" + msg.message);
+      resetRunBtn();
+      es.close();
+    }
+  };
+  es.onerror = () => {
+    // SSE connection closed (normal after job ends)
+    es.close();
+  };
+}
+
+document.getElementById("cancelBtn").addEventListener("click", () => {
+  if (state.evtSource) state.evtSource.close();
+  resetRunBtn();
+  setStatus("Cancelled", "secondary");
+});
+
+function resetRunBtn() {
+  document.getElementById("runBtn").disabled = !state.datasetName;
+  document.getElementById("cancelBtn").classList.add("d-none");
+  showSpinner("runSpinner", false);
+  document.getElementById("runIcon").classList.remove("d-none");
+  document.getElementById("runBtnText").textContent = "Run Evolution";
+}
+
+// ── Tracking chart helpers
+function resetTrackingChart() {
+  trackingChart.data.labels = [];
+  trackingChart.data.datasets[0].data = [];
+  trackingChart.update();
+}
+
+function updateTrackingChart(tracking, generation, total) {
+  trackingChart.data.labels = tracking.map((_, i) => i + 1);
+  trackingChart.data.datasets[0].data = tracking;
+  trackingChart.update();
+  document.getElementById("trackingStatus").textContent =
+    `Generation ${generation} / ${total}  |  Best: ${tracking.length ? tracking[tracking.length-1].toFixed(4) : "—"}`;
+}
+
+// ── Models table
+function clearModelsTable() {
+  document.getElementById("modelsBody").innerHTML =
+    '<tr><td colspan="5" class="text-center text-muted">No models yet — run evolution first.</td></tr>';
+  document.getElementById("saveBtn").disabled = true;
+}
+
+function populateModelsTable(rows) {
+  const tbody = document.getElementById("modelsBody");
+  tbody.innerHTML = "";
+  if (!rows || rows.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" class="text-muted text-center">No models returned.</td></tr>';
+    return;
+  }
+  rows.forEach((r, i) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${i + 1}</td>
+      <td><code style="font-size:.78rem">${escHtml(r.expression ?? "")}</code></td>
+      <td>${r.r2 != null ? r.r2.toFixed(4) : "—"}</td>
+      <td>${r.rmse != null ? r.rmse.toFixed(4) : "—"}</td>
+      <td>${r.complexity ?? "—"}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+
+// ── Save models
+document.getElementById("saveBtn").addEventListener("click", async () => {
+  const name = document.getElementById("saveModelName").value.trim();
+  if (!name) { alert("Enter a name for the model set."); return; }
+  if (!state.currentJobId) { alert("No job available."); return; }
+  const res = await fetch(`${API}/api/models/${encodeURIComponent(name)}`, {
+    method:  "POST",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify({ job_id: state.currentJobId }),
+  });
+  const data = await res.json();
+  if (data.error) { alert(data.error); return; }
+  document.getElementById("saveMsg").textContent = `✓ Saved as "${data.saved}"`;
+  refreshModelSets();
+});
+
+// ── Generate plot
+document.getElementById("plotBtn").addEventListener("click", generatePlot);
+
+async function generatePlot() {
+  const source    = document.getElementById("explorerModelSource").value;
+  const plotType  = document.getElementById("plotType").value;
+  const modIdx    = +document.getElementById("modelIndex").value;
+
+  const body = {
+    plot_type:    plotType,
+    model_index:  modIdx,
+    dataset_name: state.datasetName,
+    response_col: document.getElementById("responseCol").value,
+  };
+
+  if (source === "current") {
+    if (!state.currentJobId) { alert("Run evolution first."); return; }
+    body.job_id = state.currentJobId;
+  } else {
+    body.models_name = source;
+  }
+
+  showSpinner("plotSpinner", true);
+  document.getElementById("plotImg").style.display = "none";
+  document.getElementById("plotError").style.display = "none";
+  document.getElementById("plotPlaceholder").style.display = "none";
+
+  const res  = await fetch(`${API}/api/plot`, {
+    method:  "POST",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify(body),
+  });
+  const data = await res.json();
+  showSpinner("plotSpinner", false);
+
+  if (data.error) {
+    document.getElementById("plotError").textContent = data.error;
+    document.getElementById("plotError").style.display = "";
+    document.getElementById("plotPlaceholder").style.display = "";
+    return;
+  }
+  const img = document.getElementById("plotImg");
+  img.src = `data:image/png;base64,${data.image}`;
+  img.style.display = "";
+}
+
+// ── Initialise
+(async function init() {
+  await Promise.all([refreshDatasets(), refreshModelSets()]);
+  // Show/hide model-index group based on default plot type
+  document.getElementById("plotType").dispatchEvent(new Event("change"));
+})();
+</script>
+</body>
+</html>
