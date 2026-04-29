@@ -227,11 +227,9 @@ def _evolution_worker(job: dict, df: pd.DataFrame, response_col: str,
         job["total_gens"] = total_gens
 
         # ---- Common kwargs -----------------------------------------------
-        # Serial evolve: use returnTracking so we get fitness history per batch.
-        # Parallel evolve: must NOT include returnTracking — parallelEvolve only
-        # strips (models, tracking) tuples when kwargs["tracking"] is True, so
-        # passing returnTracking=True causes evolve() to return tuples that are
-        # never unzipped, corrupting the flat model list and crashing sortModels.
+        # Both serial and parallel paths use returnTracking to stream fitness
+        # history per batch.  parallelEvolve was fixed to return
+        # (sorted_models, combined_tracking) when returnTracking=True.
         base_kwargs = dict(
             ops            = ops_fn,
             const          = const_fn,
@@ -257,8 +255,9 @@ def _evolution_worker(job: dict, df: pd.DataFrame, response_col: str,
         )
         # Serial path gets returnTracking so we can stream fitness per batch.
         serial_extra   = {"returnTracking": True}
-        # Parallel path must NOT pass returnTracking (see comment above).
-        parallel_extra = {"returnTracking": False}
+        # Parallel path also uses returnTracking; parallelEvolve now returns
+        # (sorted_models, combined_tracking) when returnTracking=True.
+        parallel_extra = {"returnTracking": True}
 
         tracking_all: list = []
         current_models     = list(initial_models) if initial_models else []
@@ -280,9 +279,13 @@ def _evolution_worker(job: dict, df: pd.DataFrame, response_col: str,
                     exchangeCount = exchange_count,
                     **batch_kwargs,
                 )
-                # parallelEvolve always returns a plain sorted models list
-                current_models = result if isinstance(result, list) else list(result)
-                batch_tracking = []
+                # parallelEvolve returns (models, tracking) when returnTracking=True
+                if isinstance(result, tuple):
+                    current_models, batch_tracking = result
+                    batch_tracking = list(batch_tracking)
+                else:
+                    current_models = result if isinstance(result, list) else list(result)
+                    batch_tracking = []
             else:
                 batch_kwargs = {**base_kwargs, **serial_extra,
                                 "generations": this_batch,
