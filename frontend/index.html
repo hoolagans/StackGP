@@ -437,11 +437,12 @@
               <th id="testR2Th" style="display:none">Test R²</th>
               <th id="testRmseTh" style="display:none">Test RMSE</th>
               <th>Complexity</th>
+              <th>Max Curvature</th>
               <th></th>
             </tr>
           </thead>
           <tbody id="modelsBody">
-            <tr><td colspan="7" class="text-center text-muted">No models yet — run evolution first.</td></tr>
+            <tr><td colspan="8" class="text-center text-muted">No models yet — run evolution first.</td></tr>
           </tbody>
         </table>
       </div>
@@ -1083,7 +1084,7 @@ function populateModelsTable(rows, showTest = false) {
   const tbody = document.getElementById("modelsBody");
   tbody.innerHTML = "";
   if (!rows || rows.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="7" class="text-muted text-center">No Pareto front models returned.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" class="text-muted text-center">No Pareto front models returned.</td></tr>';
     return;
   }
   rows.forEach((r, i) => {
@@ -1101,6 +1102,7 @@ function populateModelsTable(rows, showTest = false) {
       <td>${r.rmse != null ? r.rmse.toFixed(4) : "—"}</td>
       ${testCols}
       <td>${r.complexity ?? "—"}</td>
+      <td>${r.curvature != null ? r.curvature.toFixed(4) : "—"}</td>
       <td>
         <button class="btn btn-sm btn-outline-secondary py-0 px-1" title="Copy expression"
                 onclick="copyToClipboard(${JSON.stringify(r.expression ?? "")}, this)">
@@ -1139,14 +1141,15 @@ function copyToClipboard(text, btn) {
 document.getElementById("exportCsvBtn").addEventListener("click", () => {
   if (!state.currentModels) return;
   const hasTest = state.hasTestSplit;
-  const headers = ["#","expression","r2","rmse", ...(hasTest ? ["test_r2","test_rmse"] : []), "complexity"];
+  const headers = ["#","expression","r2","rmse", ...(hasTest ? ["test_r2","test_rmse"] : []), "complexity","curvature"];
   const rows = state.currentModels.map((r, i) => [
     i + 1,
     `"${(r.expression ?? "").replace(/"/g,'""')}"`,
     r.r2   ?? "",
     r.rmse ?? "",
     ...(hasTest ? [r.test_r2 ?? "", r.test_rmse ?? ""] : []),
-    r.complexity ?? ""
+    r.complexity ?? "",
+    r.curvature  ?? ""
   ]);
   const csv = [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
   const blob = new Blob([csv], { type: "text/csv" });

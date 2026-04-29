@@ -109,7 +109,12 @@ def _model_summary_row(mod, input_data, response_data, var_names,
         comp = int(sgp.stackGPModelComplexity(mod))
     except Exception:
         comp = None
-    row = {"expression": expr, "r2": r2, "rmse": err, "complexity": comp}
+    try:
+        curv = float(sgp.modelCurvatureMax(mod, input_data))
+        curv = round(curv, 6) if math.isfinite(curv) else None
+    except Exception:
+        curv = None
+    row = {"expression": expr, "r2": r2, "rmse": err, "complexity": comp, "curvature": curv}
     if test_input is not None and test_response is not None:
         try:
             tfit = float(sgp.fitness(mod, test_input, test_response))
