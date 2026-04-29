@@ -690,7 +690,11 @@ async function refreshModelSets() {
   const list = await res.json();
 
   const seedSel = document.getElementById("seedModels");
-  seedSel.innerHTML = '<option value="">— none (fresh start) —</option>';
+  // Remember current selection before rebuild
+  const prevSeed = seedSel.value;
+  seedSel.innerHTML = '<option value="">— none (fresh start) —</option><option value="_latest_job_" id="seedLatestOpt">↺ Use latest run population</option>';
+  // Disable "latest" if there is no current job with models
+  document.getElementById("seedLatestOpt").disabled = !state.currentJobId;
   const exSel = document.getElementById("explorerModelSource");
   const current = exSel.querySelector('option[value="current"]');
   exSel.innerHTML = "";
@@ -699,12 +703,17 @@ async function refreshModelSets() {
   })());
 
   list.forEach(n => {
-    [seedSel, exSel].forEach(sel => {
-      const o = document.createElement("option");
-      o.value = n; o.textContent = n;
-      sel.appendChild(o);
-    });
+    const oSeed = document.createElement("option");
+    oSeed.value = n; oSeed.textContent = n;
+    seedSel.appendChild(oSeed);
+    const oEx = document.createElement("option");
+    oEx.value = n; oEx.textContent = n;
+    exSel.appendChild(oEx);
   });
+  // Restore selection if it still exists
+  if (prevSeed && seedSel.querySelector(`option[value="${CSS.escape(prevSeed)}"]`)) {
+    seedSel.value = prevSeed;
+  }
 }
 
 // ── Dataset upload
@@ -713,13 +722,28 @@ document.getElementById("uploadBtn").addEventListener("click", async () => {
   if (!file) { showToast("Please choose a CSV file first.", "danger"); return; }
   const form = new FormData();
   form.append("file", file);
+  const btn = document.getElementById("uploadBtn");
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Uploading…';
   setStatus("Uploading…", "info");
-  const res  = await fetch(`${API}/api/upload`, { method: "POST", body: form });
-  const data = await res.json();
-  if (data.error) { showToast(data.error); setStatus("Idle"); return; }
-  applyDataset(data);
-  refreshDatasets();
-  setStatus("Idle");
+  try {
+    const res  = await fetch(`${API}/api/upload`, { method: "POST", body: form });
+    let data;
+    try { data = await res.json(); } catch (_) {
+      showToast(`Upload failed (HTTP ${res.status}). Is the server running?`);
+      setStatus("Idle"); return;
+    }
+    if (data.error) { showToast(data.error); setStatus("Idle"); return; }
+    applyDataset(data);
+    await refreshDatasets();
+    setStatus("Idle");
+  } catch (err) {
+    showToast("Upload failed — could not reach the server.");
+    setStatus("Idle");
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-upload me-1"></i>Upload';
+  }
 });
 
 // ── Load existing dataset
@@ -888,6 +912,9 @@ async function startEvolution() {
   };
 
   const seedModels = document.getElementById("seedModels").value || null;
+  // "_latest_job_" means seed from the most recent in-memory job (no save required)
+  const seedJobId  = (seedModels === "_latest_job_") ? state.currentJobId : null;
+  const seedName   = (seedModels && seedModels !== "_latest_job_") ? seedModels : null;
 
   // Copy previous run data to ghost series before reset
   const prevData = trackingChart.data.datasets[0].data.slice();
@@ -908,7 +935,7 @@ async function startEvolution() {
   const resp = await fetch(`${API}/api/evolve`, {
     method:  "POST",
     headers: { "Content-Type": "application/json" },
-    body:    JSON.stringify({ dataset_name: datasetName, response_col: responseCol, settings, seed_models: seedModels }),
+    body:    JSON.stringify({ dataset_name: datasetName, response_col: responseCol, settings, seed_models: seedName, seed_job_id: seedJobId }),
   });
   const { job_id, error } = await resp.json();
   if (error) { showToast(error); resetRunBtn(); return; }

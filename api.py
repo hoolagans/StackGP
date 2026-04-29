@@ -508,12 +508,14 @@ def start_evolve():
       response_col   str   — column to use as response variable
       settings       dict  — evolve/parallelEvolve keyword arguments
       seed_models    str?  — name of a saved model set to seed with (optional)
+      seed_job_id    str?  — job ID whose in-memory models to use as seed (optional)
     """
     body = request.get_json(force=True)
     dataset_name = body.get("dataset_name")
     response_col = body.get("response_col")
     settings     = dict(body.get("settings", {}))
     seed_name    = body.get("seed_models")
+    seed_job_id  = body.get("seed_job_id")
 
     if not dataset_name or not response_col:
         return jsonify({"error": "dataset_name and response_col are required"}), 400
@@ -525,7 +527,13 @@ def start_evolve():
         return jsonify({"error": f"Column '{response_col}' not in dataset"}), 400
 
     initial_models = []
-    if seed_name:
+    if seed_job_id:
+        # Seed from in-memory job (no save required)
+        with JOBS_LOCK:
+            seed_job = JOBS.get(seed_job_id)
+        if seed_job and seed_job.get("models"):
+            initial_models = list(seed_job["models"])
+    elif seed_name:
         loaded = _load_models(seed_name)
         if loaded:
             initial_models = loaded
