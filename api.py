@@ -143,9 +143,9 @@ def _safe_models_path(name: str) -> str | None:
     if not safe:
         return None
     candidate = os.path.join(MODELS_DIR, f"{safe}.dill")
-    real_models = os.path.realpath(MODELS_DIR)
+    real_models = os.path.realpath(MODELS_DIR) + os.sep
     real_candidate = os.path.realpath(candidate)
-    if not real_candidate.startswith(real_models + os.sep) and real_candidate != real_models:
+    if not real_candidate.startswith(real_models):
         return None
     return candidate
 
@@ -156,9 +156,9 @@ def _safe_dataset_path(name: str) -> str | None:
     if not safe:
         return None
     candidate = os.path.join(DATASETS_DIR, f"{safe}.csv")
-    real_datasets = os.path.realpath(DATASETS_DIR)
+    real_datasets = os.path.realpath(DATASETS_DIR) + os.sep
     real_candidate = os.path.realpath(candidate)
-    if not real_candidate.startswith(real_datasets + os.sep) and real_candidate != real_datasets:
+    if not real_candidate.startswith(real_datasets):
         return None
     return candidate
 
@@ -610,12 +610,9 @@ def generate_plot():
             img = _capture_plot(DATA_PLOT_FUNCS[plot_type], models[model_index])
         else:
             return jsonify({"error": f"Unknown plot type '{plot_type}'"}), 400
-    except (ValueError, KeyError, RuntimeError, TypeError):
+    except Exception:  # noqa: BLE001
         app.logger.exception("Plot generation failed")
         return jsonify({"error": "Plot generation failed. Check that your data and models are valid."}), 500
-    except Exception:  # noqa: BLE001
-        app.logger.exception("Plot generation failed with unexpected error")
-        return jsonify({"error": "An unexpected error occurred while generating the plot."}), 500
 
     return jsonify({"image": img, "format": "png"})
 
