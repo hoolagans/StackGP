@@ -196,11 +196,37 @@ def _save_models_to_disk(name: str, models):
         dill.dump(models, f)
 
 
+def _read_csv(path: str) -> pd.DataFrame:
+    """
+    Read a CSV file, auto-detecting whether it has a header row.
+
+    If the first row looks like data (all values can be parsed as numbers)
+    the file is treated as headerless and columns are named x0, x1, … x(n-1).
+    Otherwise pandas' default header=0 behaviour is used.
+    """
+    df_default = pd.read_csv(path)
+    # Check whether every column name looks numeric (i.e. came from a data row)
+    def _is_numeric_str(s: str) -> bool:
+        try:
+            float(str(s))
+            return True
+        except ValueError:
+            return False
+
+    if df_default.columns.size > 0 and all(
+        _is_numeric_str(c) for c in df_default.columns
+    ):
+        df_no_hdr = pd.read_csv(path, header=None)
+        df_no_hdr.columns = [f"x{i}" for i in range(len(df_no_hdr.columns))]
+        return df_no_hdr
+    return df_default
+
+
 def _load_dataset(name: str):
     path = _safe_dataset_path(name)
     if path is None or not os.path.exists(path):
         return None
-    return pd.read_csv(path)
+    return _read_csv(path)
 
 
 # ---------------------------------------------------------------------------
@@ -448,7 +474,11 @@ def upload_dataset():
         return jsonify({"error": "Invalid filename"}), 400
     file.save(save_path)
 
-    df = pd.read_csv(save_path)
+    df = _read_csv(save_path)
+    # If the file was headerless we re-save it with the auto-generated column
+    # names so that every subsequent load (including _load_dataset) sees them.
+    if df.columns[0] == "x0":
+        df.to_csv(save_path, index=False)
     preview = df.head(5).to_dict(orient="records")
     return jsonify({
         "name":    safe_name,
