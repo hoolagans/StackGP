@@ -404,6 +404,8 @@ def _evolution_worker(job: dict, df: pd.DataFrame, response_col: str,
         # Build summary rows for the Pareto front models (non-dominated in
         # accuracy vs. complexity).  Mirror what plotModels() does internally:
         # deep-copy, convert to list form, extract front, restore, then sort.
+        # We also track each Pareto model's original index in current_models so
+        # the frontend can send the correct model_index to the plot endpoint.
         pareto_mods = copy.deepcopy(current_models)
         if pareto_mods:
             # Ensure each model has both fitness and complexity as objectives.
@@ -424,11 +426,35 @@ def _evolution_worker(job: dict, df: pd.DataFrame, response_col: str,
             pareto_front = sgp.paretoTournament(pareto_mods)
             [sgp.modelRestoreForm(mod) for mod in pareto_front]
             pareto_front.sort(key=lambda m: m[2][0])  # best accuracy first
+
+            # Map each Pareto model back to its position in current_models by
+            # matching on the expression string so the plot endpoint receives
+            # the correct index into the full sorted list.
+            def _expr(mod):
+                try:
+                    return str(sgp.printGPModel(mod))
+                except Exception:
+                    return ""
+
+            original_exprs = [_expr(m) for m in current_models]
+            pareto_original_indices = []
+            for pmod in pareto_front:
+                pexpr = _expr(pmod)
+                idx = next(
+                    (i for i, e in enumerate(original_exprs) if e == pexpr),
+                    0,
+                )
+                pareto_original_indices.append(idx)
         else:
             pareto_front = []
-        summary = [_model_summary_row(m, input_data, response_data, var_names,
-                                      test_input, test_response)
-                   for m in pareto_front]
+            pareto_original_indices = []
+
+        summary = [
+            {**_model_summary_row(m, input_data, response_data, var_names,
+                                  test_input, test_response),
+             "model_index": orig_idx}
+            for m, orig_idx in zip(pareto_front, pareto_original_indices)
+        ]
 
         q.put(json.dumps({
             "type":     "complete",

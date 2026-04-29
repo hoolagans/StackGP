@@ -590,9 +590,11 @@ let state = {
 };
 
 // Hide the "Previous run" legend entry when there is no ghost data
-function filterEmptyPreviousRunLegend(item, chart) {
+// Chart.js v4 passes the chart DATA config (not the chart instance) as the
+// second argument to legend labels.filter — so use `data.datasets`, not `chart.data.datasets`.
+function filterEmptyPreviousRunLegend(item, data) {
   return item.datasetIndex === 1
-    ? chart.data.datasets[1].data.length > 0
+    ? data.datasets[1].data.length > 0
     : true;
 }
 
@@ -1106,10 +1108,13 @@ function populateModelsTable(rows, showTest = false) {
         </button>
       </td>
     `;
-    // Click row to select model index
+    // Click row to select model index — use the original index in the full
+    // sorted model list (sent by the server in r.model_index) so the plot
+    // endpoint receives the correct model, not the Pareto front row number.
     tr.addEventListener("click", (ev) => {
       if (ev.target.closest("button")) return;
-      document.getElementById("modelIndex").value = i;
+      const modelIdx = r.model_index != null ? r.model_index : i;
+      document.getElementById("modelIndex").value = modelIdx;
       // Scroll to explorer and auto-trigger if per-model plot
       const plotType = document.getElementById("plotType").value;
       const perModel = ["plotModelResponseComparison", "plotPredictionResponseCorrelation",
