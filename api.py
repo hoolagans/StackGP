@@ -461,6 +461,9 @@ def _evolution_worker(job: dict, df: pd.DataFrame, response_col: str,
             for m, orig_idx in zip(pareto_front, pareto_original_indices)
         ]
 
+        job["summary"]       = summary
+        job["has_test_split"] = test_input is not None
+
         q.put(json.dumps({
             "type":     "complete",
             "tracking": tracking_all,
@@ -673,14 +676,16 @@ def get_job_status(job_id):
     if job is None:
         return jsonify({"error": "Job not found"}), 404
     return jsonify({
-        "id":         job["id"],
-        "status":     job["status"],
-        "generation": job["generation"],
-        "total_gens": job["total_gens"],
-        "tracking":   job["tracking"],
-        "error":      job["error"],
-        "has_models": job["models"] is not None,
-        "meta":       job.get("meta", {}),
+        "id":            job["id"],
+        "status":        job["status"],
+        "generation":    job["generation"],
+        "total_gens":    job["total_gens"],
+        "tracking":      job["tracking"],
+        "error":         job["error"],
+        "has_models":    job["models"] is not None,
+        "summary":       job.get("summary"),
+        "has_test_split": job.get("has_test_split", False),
+        "meta":          job.get("meta", {}),
     })
 
 

@@ -1285,10 +1285,27 @@ async function reloadHistoryJob(jobId) {
   const res = await fetch(`${API}/api/jobs/${jobId}`);
   const job = await res.json();
   if (job.error || !job.has_models) { showToast("Models not available for this job."); return; }
-  // To reload the summary we need to call the plot endpoint which already has the models
-  // Instead, just switch the explorer source to "current" and update currentJobId
+
   state.currentJobId = jobId;
-  showToast("Explorer now pointing at this job. Use Model Explorer to view plots.", "info");
+
+  if (job.tracking && job.tracking.length) {
+    updateTrackingChart(job.tracking, job.tracking.length, job.total_gens || job.tracking.length);
+  }
+
+  if (job.summary && job.summary.length) {
+    const showTest = !!job.has_test_split;
+    populateModelsTable(job.summary, showTest);
+    state.currentModels = job.summary;
+    state.hasTestSplit  = showTest;
+    document.getElementById("saveBtn").disabled = false;
+    document.getElementById("exportCsvBtn").disabled = false;
+  }
+
+  setStatus("Complete", "success");
+  document.getElementById("trackingStatus").textContent =
+    `Complete — ${job.tracking ? job.tracking.length : 0} generations (reloaded)`;
+
+  showToast("Results reloaded from history.", "info");
 }
 
 // ── Settings presets (localStorage)
