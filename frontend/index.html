@@ -100,9 +100,14 @@
         <!-- Or pick existing -->
         <div class="col-md-3">
           <label class="form-label fw-semibold">or load existing</label>
-          <select class="form-select" id="existingDataset">
-            <option value="">— select —</option>
-          </select>
+          <div class="input-group">
+            <select class="form-select" id="existingDataset">
+              <option value="">— select —</option>
+            </select>
+            <button class="btn btn-outline-danger btn-sm" id="deleteDatasetBtn" title="Delete selected dataset" disabled>
+              <i class="bi bi-trash"></i>
+            </button>
+          </div>
         </div>
         <!-- Response column -->
         <div class="col-md-3">
@@ -120,6 +125,27 @@
 
       <!-- Data info row -->
       <div id="dataInfo" class="mt-2 text-muted small" style="display:none"></div>
+
+      <!-- Stats accordion -->
+      <div id="statsAccordion" class="mt-2" style="display:none">
+        <div class="accordion accordion-flush" id="statsAccordionEl">
+          <div class="accordion-item border rounded">
+            <h2 class="accordion-header">
+              <button class="accordion-button collapsed py-2" type="button"
+                      data-bs-toggle="collapse" data-bs-target="#statsBody">
+                <i class="bi bi-bar-chart-steps me-2"></i>Column Statistics
+              </button>
+            </h2>
+            <div id="statsBody" class="accordion-collapse collapse">
+              <div class="accordion-body p-2">
+                <div class="table-responsive">
+                  <table class="table table-sm table-bordered preview-table mb-0" id="statsTable"></table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
 
       <!-- Preview table -->
       <div id="previewContainer" class="mt-3" style="display:none">
@@ -234,6 +260,13 @@
           <label class="form-label fw-semibold">Spawn rate %</label>
           <input type="number" class="form-control" id="spawnRate" value="10" min="0" max="100" />
         </div>
+        <!-- Rates sum indicator -->
+        <div class="col-md-2 col-sm-4 d-flex align-items-end">
+          <div class="w-100">
+            <label class="form-label fw-semibold">Rates sum</label>
+            <div id="ratesSum" class="form-control text-center fw-bold">100</div>
+          </div>
+        </div>
 
         <!-- Elitism rate -->
         <div class="col-md-2 col-sm-4">
@@ -284,6 +317,13 @@
                  title="Generations per live-tracking batch" />
         </div>
 
+        <!-- Test split -->
+        <div class="col-md-2 col-sm-4">
+          <label class="form-label fw-semibold">Test split %</label>
+          <input type="number" class="form-control" id="testSplit" value="0" min="0" max="80"
+                 title="Hold out this percentage of data for testing (0 = no split)" />
+        </div>
+
         <!-- Early termination -->
         <div class="col-md-2 col-sm-4 d-flex align-items-end">
           <div class="form-check form-switch ms-2">
@@ -297,13 +337,28 @@
         </div>
       </div>
 
-      <!-- Seed population -->
-      <div class="row mt-3">
+      <!-- Seed population + presets row -->
+      <div class="row mt-3 align-items-end g-2">
         <div class="col-md-4">
           <label class="form-label fw-semibold"><i class="bi bi-seed me-1"></i>Seed population from saved model set</label>
           <select class="form-select" id="seedModels">
             <option value="">— none (fresh start) —</option>
           </select>
+        </div>
+        <div class="col-md-auto ms-auto">
+          <label class="form-label fw-semibold">Settings preset</label>
+          <div class="input-group">
+            <input type="text" class="form-control" id="presetName" placeholder="preset name" style="max-width:140px" />
+            <button class="btn btn-outline-secondary" id="savePresetBtn" title="Save current settings as preset">
+              <i class="bi bi-bookmark-plus"></i>
+            </button>
+            <select class="form-select" id="loadPresetSel" style="max-width:160px">
+              <option value="">— load preset —</option>
+            </select>
+            <button class="btn btn-outline-secondary" id="deletePresetBtn" title="Delete selected preset">
+              <i class="bi bi-bookmark-x"></i>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -332,6 +387,11 @@
     </div>
     <div class="card-body">
       <canvas id="trackingChart"></canvas>
+      <div id="bestExprWrap" class="mt-2" style="display:none">
+        <label class="form-label fw-semibold small mb-1">Best model so far</label>
+        <code id="bestExprDisplay" class="d-block p-2 bg-light rounded border text-break"
+              style="font-size:.78rem;word-break:break-all;white-space:pre-wrap"></code>
+      </div>
     </div>
   </div>
 
@@ -354,22 +414,30 @@
           </div>
         </div>
         <div class="col-auto text-muted small" id="saveMsg"></div>
+        <div class="col-auto ms-auto">
+          <button class="btn btn-outline-secondary btn-sm" id="exportCsvBtn" disabled title="Export results as CSV">
+            <i class="bi bi-filetype-csv me-1"></i>Export CSV
+          </button>
+        </div>
       </div>
 
       <!-- Top models table -->
       <div class="table-responsive">
         <table class="table table-sm table-hover model-table" id="modelsTable">
-          <thead>
+          <thead id="modelsTableHead">
             <tr>
               <th>#</th>
               <th>Expression</th>
               <th>R²</th>
               <th>RMSE</th>
+              <th id="testR2Th" style="display:none">Test R²</th>
+              <th id="testRmseTh" style="display:none">Test RMSE</th>
               <th>Complexity</th>
+              <th></th>
             </tr>
           </thead>
           <tbody id="modelsBody">
-            <tr><td colspan="5" class="text-center text-muted">No models yet — run evolution first.</td></tr>
+            <tr><td colspan="7" class="text-center text-muted">No models yet — run evolution first.</td></tr>
           </tbody>
         </table>
       </div>
@@ -408,6 +476,7 @@
               <option value="plotPredictionResponseCorrelation">Prediction vs response</option>
               <option value="plotModelResiduals">Residuals</option>
               <option value="plotModelResidualDistribution">Residual distribution</option>
+              <option value="sensitivityAnalysis">Sensitivity analysis</option>
             </optgroup>
           </select>
         </div>
@@ -433,11 +502,43 @@
       <!-- Plot output -->
       <div class="mt-3 text-center">
         <img id="plotImg" alt="Generated plot" />
+        <div class="mt-2">
+          <a id="plotDownloadBtn" class="btn btn-sm btn-outline-secondary" style="display:none" download="stackgp-plot.png">
+            <i class="bi bi-download me-1"></i>Download PNG
+          </a>
+        </div>
         <div id="plotError" class="text-danger small mt-2" style="display:none"></div>
         <div id="plotPlaceholder" class="text-muted py-4">
           <i class="bi bi-image fs-2 d-block mb-2 opacity-25"></i>
           Select a plot type and click Generate.
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── 7. Job History ───────────────────────────────────────────────── -->
+  <div class="card section-card">
+    <div class="card-header">
+      <span class="section-number">6</span>Job History
+    </div>
+    <div class="card-body p-2">
+      <div id="historyEmpty" class="text-muted text-center py-3">No runs this session.</div>
+      <div class="table-responsive" id="historyTableWrap" style="display:none">
+        <table class="table table-sm table-hover model-table mb-0" id="historyTable">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Started</th>
+              <th>Dataset</th>
+              <th>Method</th>
+              <th>Gens</th>
+              <th>Best R²</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="historyBody"></tbody>
+        </table>
       </div>
     </div>
   </div>
@@ -470,17 +571,19 @@ function showToast(message, type = "danger") {
     </div>`;
   container.insertAdjacentHTML("beforeend", html);
   const el = document.getElementById(id);
-  // Auto-dismiss after 6 s
   setTimeout(() => el && el.remove(), 6000);
 }
 
 // ── State
 let state = {
-  datasetName:  null,
-  responseCols: [],
-  currentJobId: null,
-  currentModels: null,   // summary rows from last complete job
-  evtSource:    null,
+  datasetName:    null,
+  responseCols:   [],
+  currentJobId:   null,
+  currentModels:  null,   // summary rows from last complete job
+  hasTestSplit:   false,
+  evtSource:      null,
+  runStartTime:   null,   // Date.now() at start of evolution
+  jobHistory:     [],     // [{job_id, meta, bestR2, status}]
 };
 
 // ── Chart.js setup
@@ -489,15 +592,27 @@ const trackingChart = new Chart(ctx, {
   type: "line",
   data: {
     labels: [],
-    datasets: [{
-      label: "Best Fitness (1 − R²)",
-      data: [],
-      borderColor: "#5c6bc0",
-      backgroundColor: "rgba(92,107,192,.1)",
-      fill: true,
-      tension: 0.3,
-      pointRadius: 2,
-    }]
+    datasets: [
+      {
+        label: "Best Fitness (1 − R²)",
+        data: [],
+        borderColor: "#5c6bc0",
+        backgroundColor: "rgba(92,107,192,.1)",
+        fill: true,
+        tension: 0.3,
+        pointRadius: 2,
+      },
+      {
+        label: "Previous run",
+        data: [],
+        borderColor: "rgba(92,107,192,.3)",
+        backgroundColor: "transparent",
+        borderDash: [4, 4],
+        fill: false,
+        tension: 0.3,
+        pointRadius: 0,
+      }
+    ]
   },
   options: {
     animation: false,
@@ -506,7 +621,7 @@ const trackingChart = new Chart(ctx, {
       x: { title: { display: true, text: "Generation" } },
       y: { title: { display: true, text: "Fitness (1 − R²)" } },
     },
-    plugins: { legend: { display: false } },
+    plugins: { legend: { display: true, labels: { filter: item => item.datasetIndex === 1 ? item.chart.data.datasets[1].data.length > 0 : true } } },
   }
 });
 
@@ -519,13 +634,42 @@ function setStatus(text, color = "secondary") {
 function showSpinner(id, show) {
   document.getElementById(id).classList.toggle("active", show);
 }
+function escHtml(s) {
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+
+// ── Rates sum validation
+function updateRatesSum() {
+  const sum = +document.getElementById("mutationRate").value
+            + +document.getElementById("crossoverRate").value
+            + +document.getElementById("spawnRate").value;
+  const el = document.getElementById("ratesSum");
+  el.textContent = sum;
+  if (sum !== 100) {
+    el.classList.add("text-danger", "border-danger");
+    el.classList.remove("text-success");
+  } else {
+    el.classList.remove("text-danger", "border-danger");
+    el.classList.add("text-success");
+  }
+  checkRunReady();
+}
+["mutationRate","crossoverRate","spawnRate"].forEach(id =>
+  document.getElementById(id).addEventListener("input", updateRatesSum));
+
+// ── Enable run button when dataset is loaded and rates valid
+function checkRunReady() {
+  const sum = +document.getElementById("mutationRate").value
+            + +document.getElementById("crossoverRate").value
+            + +document.getElementById("spawnRate").value;
+  document.getElementById("runBtn").disabled = !state.datasetName || sum !== 100;
+}
 
 // ── Populate dropdowns from API
 async function refreshDatasets() {
   const res  = await fetch(`${API}/api/datasets`);
   const list = await res.json();
   const sel  = document.getElementById("existingDataset");
-  // keep placeholder
   sel.innerHTML = '<option value="">— select —</option>';
   list.forEach(n => {
     const o = document.createElement("option");
@@ -538,10 +682,8 @@ async function refreshModelSets() {
   const res  = await fetch(`${API}/api/models`);
   const list = await res.json();
 
-  // Seed dropdown
   const seedSel = document.getElementById("seedModels");
   seedSel.innerHTML = '<option value="">— none (fresh start) —</option>';
-  // Explorer source dropdown
   const exSel = document.getElementById("explorerModelSource");
   const current = exSel.querySelector('option[value="current"]');
   exSel.innerHTML = "";
@@ -564,7 +706,6 @@ document.getElementById("uploadBtn").addEventListener("click", async () => {
   if (!file) { showToast("Please choose a CSV file first.", "danger"); return; }
   const form = new FormData();
   form.append("file", file);
-  showSpinner("runSpinner", false);
   setStatus("Uploading…", "info");
   const res  = await fetch(`${API}/api/upload`, { method: "POST", body: form });
   const data = await res.json();
@@ -576,16 +717,41 @@ document.getElementById("uploadBtn").addEventListener("click", async () => {
 
 // ── Load existing dataset
 document.getElementById("existingDataset").addEventListener("change", async function () {
-  if (!this.value) return;
-  const res  = await fetch(`${API}/api/datasets/${this.value}`);
+  const val = this.value;
+  document.getElementById("deleteDatasetBtn").disabled = !val;
+  if (!val) return;
+  const res  = await fetch(`${API}/api/datasets/${val}`);
   const data = await res.json();
   if (data.error) { showToast(data.error); return; }
   applyDataset(data);
 });
 
+// ── Delete dataset
+document.getElementById("deleteDatasetBtn").addEventListener("click", async () => {
+  const sel = document.getElementById("existingDataset");
+  const name = sel.value;
+  if (!name) return;
+  if (!confirm(`Delete dataset "${name}"?`)) return;
+  const res = await fetch(`${API}/api/datasets/${encodeURIComponent(name)}`, { method: "DELETE" });
+  const data = await res.json();
+  if (data.error) { showToast(data.error); return; }
+  showToast(`Dataset "${name}" deleted.`, "success");
+  // Clear if it was the active dataset
+  if (state.datasetName === name) {
+    state.datasetName = null;
+    document.getElementById("responseCol").innerHTML = '<option value="">— upload first —</option>';
+    document.getElementById("responseCol").disabled = true;
+    document.getElementById("previewToggle").disabled = true;
+    document.getElementById("dataInfo").style.display = "none";
+    document.getElementById("statsAccordion").style.display = "none";
+    checkRunReady();
+  }
+  document.getElementById("deleteDatasetBtn").disabled = true;
+  await refreshDatasets();
+});
+
 function applyDataset(data) {
   state.datasetName = data.name;
-  // Response column
   const sel = document.getElementById("responseCol");
   sel.innerHTML = "";
   data.columns.forEach(c => {
@@ -593,7 +759,6 @@ function applyDataset(data) {
     o.value = c; o.textContent = c;
     sel.appendChild(o);
   });
-  // Default: last column is response
   sel.value = data.columns[data.columns.length - 1];
   sel.disabled = false;
   document.getElementById("previewToggle").disabled = false;
@@ -602,6 +767,32 @@ function applyDataset(data) {
     `Dataset: ${data.name} | ${data.rows} rows × ${data.columns.length} columns`;
   renderPreview(data.preview, data.columns);
   checkRunReady();
+  fetchAndRenderStats(data.name);
+}
+
+async function fetchAndRenderStats(name) {
+  const res = await fetch(`${API}/api/datasets/${encodeURIComponent(name)}/stats`);
+  if (!res.ok) return;
+  const stats = await res.json();
+  const table = document.getElementById("statsTable");
+  table.innerHTML = "";
+  const thead = table.createTHead();
+  const hr = thead.insertRow();
+  ["Column","Mean","Std","Min","Max","Nulls"].forEach(h => {
+    const th = document.createElement("th"); th.textContent = h; hr.appendChild(th);
+  });
+  const tbody = table.createTBody();
+  stats.forEach(s => {
+    const tr = tbody.insertRow();
+    [s.column,
+     s.mean != null ? s.mean : "—",
+     s.std  != null ? s.std  : "—",
+     s.min  != null ? s.min  : "—",
+     s.max  != null ? s.max  : "—",
+     s.null_count
+    ].forEach(v => { const td = tr.insertCell(); td.textContent = v; });
+  });
+  document.getElementById("statsAccordion").style.display = "";
 }
 
 function renderPreview(rows, cols) {
@@ -622,11 +813,6 @@ document.getElementById("previewToggle").addEventListener("click", () => {
   c.style.display = c.style.display === "none" ? "" : "none";
 });
 
-// ── Enable run button when dataset is loaded
-function checkRunReady() {
-  document.getElementById("runBtn").disabled = !state.datasetName;
-}
-
 // ── Evolve method toggle: show/hide parallel options
 document.getElementById("evolveMethod").addEventListener("change", function () {
   const show = this.value === "parallelEvolve";
@@ -638,7 +824,8 @@ document.getElementById("evolveMethod").addEventListener("change", function () {
 // ── Plot type: show/hide model index
 document.getElementById("plotType").addEventListener("change", function () {
   const perModel = ["plotModelResponseComparison", "plotPredictionResponseCorrelation",
-                    "plotModelResiduals", "plotModelResidualDistribution"];
+                    "plotModelResiduals", "plotModelResidualDistribution",
+                    "sensitivityAnalysis"];
   document.getElementById("modelIndexGroup").style.display =
     perModel.includes(this.value) ? "" : "none";
 });
@@ -647,6 +834,14 @@ document.getElementById("plotType").addEventListener("change", function () {
 document.getElementById("runBtn").addEventListener("click", startEvolution);
 
 async function startEvolution() {
+  const sum = +document.getElementById("mutationRate").value
+            + +document.getElementById("crossoverRate").value
+            + +document.getElementById("spawnRate").value;
+  if (sum !== 100) {
+    showToast("Mutation + Crossover + Spawn rates must sum to 100.");
+    return;
+  }
+
   const datasetName = state.datasetName;
   const responseCol = document.getElementById("responseCol").value;
   if (!datasetName || !responseCol) {
@@ -677,6 +872,7 @@ async function startEvolution() {
     allowEarlyTermination:     document.getElementById("allowEarlyTermination").checked,
     earlyTerminationThreshold: +document.getElementById("earlyTerminationThreshold").value,
     liveTrackingInterval:      +document.getElementById("liveTrackingInterval").value,
+    testSplit:                 +document.getElementById("testSplit").value,
     useParallel,
     n_jobs:                    +document.getElementById("nJobs").value,
     cascades:                  document.getElementById("cascades").checked,
@@ -686,8 +882,10 @@ async function startEvolution() {
 
   const seedModels = document.getElementById("seedModels").value || null;
 
-  // Reset UI
-  resetTrackingChart();
+  // Copy previous run data to ghost series before reset
+  const prevData = trackingChart.data.datasets[0].data.slice();
+  resetTrackingChart(prevData);
+
   clearModelsTable();
   document.getElementById("runBtn").disabled = true;
   document.getElementById("cancelBtn").classList.remove("d-none");
@@ -696,8 +894,10 @@ async function startEvolution() {
   document.getElementById("runBtnText").textContent = "Running…";
   setStatus("Running", "warning");
   document.getElementById("trackingStatus").textContent = "Evolution running…";
+  document.getElementById("bestExprWrap").style.display = "none";
+  state.hasTestSplit = settings.testSplit > 0;
+  state.runStartTime = Date.now();
 
-  // Start job
   const resp = await fetch(`${API}/api/evolve`, {
     method:  "POST",
     headers: { "Content-Type": "application/json" },
@@ -720,40 +920,58 @@ function openSSE(jobId) {
 
     if (msg.type === "progress") {
       updateTrackingChart(msg.tracking, msg.generation, msg.total);
+      if (msg.best_expr) {
+        document.getElementById("bestExprWrap").style.display = "";
+        document.getElementById("bestExprDisplay").textContent = msg.best_expr;
+      }
     }
     if (msg.type === "complete") {
       updateTrackingChart(msg.tracking, msg.tracking.length, msg.tracking.length);
-      populateModelsTable(msg.summary);
+      const showTest = !!msg.has_test_split;
+      populateModelsTable(msg.summary, showTest);
       state.currentModels = msg.summary;
+      state.hasTestSplit  = showTest;
       document.getElementById("saveBtn").disabled = false;
+      document.getElementById("exportCsvBtn").disabled = false;
       setStatus("Complete", "success");
       document.getElementById("trackingStatus").textContent =
         `Complete — ${msg.tracking.length} generations`;
+      // Update history
+      addJobHistory(jobId, msg.tracking, "complete");
       resetRunBtn();
       refreshModelSets();
+      es.close();
+    }
+    if (msg.type === "cancelled") {
+      setStatus("Cancelled", "secondary");
+      addJobHistory(jobId, trackingChart.data.datasets[0].data, "cancelled");
+      resetRunBtn();
       es.close();
     }
     if (msg.type === "error") {
       setStatus("Error", "danger");
       showToast("Evolution error: " + msg.message);
+      addJobHistory(jobId, trackingChart.data.datasets[0].data, "error");
       resetRunBtn();
       es.close();
     }
   };
-  es.onerror = () => {
-    // SSE connection closed (normal after job ends)
-    es.close();
-  };
+  es.onerror = () => { es.close(); };
 }
 
-document.getElementById("cancelBtn").addEventListener("click", () => {
+document.getElementById("cancelBtn").addEventListener("click", async () => {
+  if (state.currentJobId) {
+    try {
+      await fetch(`${API}/api/jobs/${state.currentJobId}/cancel`, { method: "POST" });
+    } catch (_) { /* ignore */ }
+  }
   if (state.evtSource) state.evtSource.close();
   resetRunBtn();
   setStatus("Cancelled", "secondary");
 });
 
 function resetRunBtn() {
-  document.getElementById("runBtn").disabled = !state.datasetName;
+  checkRunReady();
   document.getElementById("cancelBtn").classList.add("d-none");
   showSpinner("runSpinner", false);
   document.getElementById("runIcon").classList.remove("d-none");
@@ -761,7 +979,14 @@ function resetRunBtn() {
 }
 
 // ── Tracking chart helpers
-function resetTrackingChart() {
+function resetTrackingChart(prevData) {
+  // Move current run to ghost series
+  if (prevData && prevData.length > 0) {
+    trackingChart.data.datasets[1].data   = prevData;
+    trackingChart.data.datasets[1].labels = prevData.map((_, i) => i + 1);
+  } else {
+    trackingChart.data.datasets[1].data = [];
+  }
   trackingChart.data.labels = [];
   trackingChart.data.datasets[0].data = [];
   trackingChart.update();
@@ -771,43 +996,115 @@ function updateTrackingChart(tracking, generation, total) {
   trackingChart.data.labels = tracking.map((_, i) => i + 1);
   trackingChart.data.datasets[0].data = tracking;
   trackingChart.update();
+
   const lastFit = tracking.length && typeof tracking[tracking.length - 1] === "number"
     ? tracking[tracking.length - 1].toFixed(4)
     : "—";
+
+  let etaStr = "";
+  if (state.runStartTime && generation > 0 && generation < total) {
+    const elapsed = (Date.now() - state.runStartTime) / 1000;
+    const remaining = (elapsed / generation) * (total - generation);
+    etaStr = `  |  ETA: ${formatSeconds(remaining)}`;
+  }
+
   document.getElementById("trackingStatus").textContent =
-    `Generation ${generation} / ${total}  |  Best: ${lastFit}`;
+    `Generation ${generation} / ${total}  |  Best: ${lastFit}${etaStr}`;
+}
+
+function formatSeconds(s) {
+  s = Math.round(s);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60), r = s % 60;
+  return `${m}m ${r}s`;
 }
 
 // ── Models table
 function clearModelsTable() {
   document.getElementById("modelsBody").innerHTML =
-    '<tr><td colspan="5" class="text-center text-muted">No models yet — run evolution first.</td></tr>';
+    '<tr><td colspan="7" class="text-center text-muted">No models yet — run evolution first.</td></tr>';
   document.getElementById("saveBtn").disabled = true;
+  document.getElementById("exportCsvBtn").disabled = true;
+  document.getElementById("testR2Th").style.display = "none";
+  document.getElementById("testRmseTh").style.display = "none";
 }
 
-function populateModelsTable(rows) {
+function populateModelsTable(rows, showTest = false) {
+  document.getElementById("testR2Th").style.display   = showTest ? "" : "none";
+  document.getElementById("testRmseTh").style.display = showTest ? "" : "none";
   const tbody = document.getElementById("modelsBody");
   tbody.innerHTML = "";
   if (!rows || rows.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="5" class="text-muted text-center">No models returned.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" class="text-muted text-center">No models returned.</td></tr>';
     return;
   }
   rows.forEach((r, i) => {
     const tr = document.createElement("tr");
+    tr.style.cursor = "pointer";
+    tr.title = "Click to select this model in the explorer";
+    const testCols = showTest
+      ? `<td>${r.test_r2   != null ? r.test_r2.toFixed(4)   : "—"}</td>
+         <td>${r.test_rmse != null ? r.test_rmse.toFixed(4) : "—"}</td>`
+      : "";
     tr.innerHTML = `
       <td>${i + 1}</td>
       <td><code style="font-size:.78rem">${escHtml(r.expression ?? "")}</code></td>
-      <td>${r.r2 != null ? r.r2.toFixed(4) : "—"}</td>
+      <td>${r.r2   != null ? r.r2.toFixed(4)   : "—"}</td>
       <td>${r.rmse != null ? r.rmse.toFixed(4) : "—"}</td>
+      ${testCols}
       <td>${r.complexity ?? "—"}</td>
+      <td>
+        <button class="btn btn-sm btn-outline-secondary py-0 px-1" title="Copy expression"
+                onclick="copyToClipboard(${JSON.stringify(r.expression ?? "")}, this)">
+          <i class="bi bi-clipboard"></i>
+        </button>
+      </td>
     `;
+    // Click row to select model index
+    tr.addEventListener("click", (ev) => {
+      if (ev.target.closest("button")) return;
+      document.getElementById("modelIndex").value = i;
+      // Scroll to explorer and auto-trigger if per-model plot
+      const plotType = document.getElementById("plotType").value;
+      const perModel = ["plotModelResponseComparison", "plotPredictionResponseCorrelation",
+                        "plotModelResiduals", "plotModelResidualDistribution",
+                        "sensitivityAnalysis"];
+      if (perModel.includes(plotType)) generatePlot();
+      document.getElementById("modelIndex").scrollIntoView({ behavior: "smooth" });
+    });
     tbody.appendChild(tr);
   });
 }
 
-function escHtml(s) {
-  return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+function copyToClipboard(text, btn) {
+  navigator.clipboard.writeText(text).then(() => {
+    const icon = btn.querySelector("i");
+    icon.className = "bi bi-clipboard-check";
+    setTimeout(() => { icon.className = "bi bi-clipboard"; }, 1500);
+  }).catch(() => showToast("Copy failed — browser may not allow clipboard access.", "danger"));
 }
+
+// ── Export results as CSV
+document.getElementById("exportCsvBtn").addEventListener("click", () => {
+  if (!state.currentModels) return;
+  const hasTest = state.hasTestSplit;
+  const headers = ["#","expression","r2","rmse", ...(hasTest ? ["test_r2","test_rmse"] : []), "complexity"];
+  const rows = state.currentModels.map((r, i) => [
+    i + 1,
+    `"${(r.expression ?? "").replace(/"/g,'""')}"`,
+    r.r2   ?? "",
+    r.rmse ?? "",
+    ...(hasTest ? [r.test_r2 ?? "", r.test_rmse ?? ""] : []),
+    r.complexity ?? ""
+  ]);
+  const csv = [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  a.href = url; a.download = "stackgp-results.csv";
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
+});
 
 // ── Save models
 document.getElementById("saveBtn").addEventListener("click", async () => {
@@ -849,6 +1146,7 @@ async function generatePlot() {
 
   showSpinner("plotSpinner", true);
   document.getElementById("plotImg").style.display = "none";
+  document.getElementById("plotDownloadBtn").style.display = "none";
   document.getElementById("plotError").style.display = "none";
   document.getElementById("plotPlaceholder").style.display = "none";
 
@@ -866,15 +1164,202 @@ async function generatePlot() {
     document.getElementById("plotPlaceholder").style.display = "";
     return;
   }
+  const dataUrl = `data:image/png;base64,${data.image}`;
   const img = document.getElementById("plotImg");
-  img.src = `data:image/png;base64,${data.image}`;
+  img.src = dataUrl;
   img.style.display = "block";
+  const dlBtn = document.getElementById("plotDownloadBtn");
+  dlBtn.href = dataUrl;
+  dlBtn.style.display = "";
 }
+
+// ── Job history
+function addJobHistory(jobId, tracking, status) {
+  const lastFit = tracking && tracking.length
+    ? tracking[tracking.length - 1]
+    : null;
+  const bestR2 = lastFit != null && isFinite(lastFit) ? (1 - lastFit).toFixed(4) : null;
+  const res = fetch(`${API}/api/jobs/${jobId}`).then(r => r.json()).then(job => {
+    const entry = {
+      job_id:  jobId,
+      meta:    job.meta || {},
+      bestR2,
+      status,
+    };
+    state.jobHistory.unshift(entry);
+    renderHistory();
+  }).catch(() => {
+    state.jobHistory.unshift({ job_id: jobId, meta: {}, bestR2, status });
+    renderHistory();
+  });
+}
+
+function renderHistory() {
+  const tbody = document.getElementById("historyBody");
+  const wrap  = document.getElementById("historyTableWrap");
+  const empty = document.getElementById("historyEmpty");
+  if (state.jobHistory.length === 0) {
+    empty.style.display = ""; wrap.style.display = "none"; return;
+  }
+  empty.style.display = "none"; wrap.style.display = "";
+  tbody.innerHTML = "";
+  state.jobHistory.forEach((e, idx) => {
+    const tr = document.createElement("tr");
+    const badge = e.status === "complete" ? "success" : e.status === "error" ? "danger" : "secondary";
+    tr.innerHTML = `
+      <td>${idx + 1}</td>
+      <td>${escHtml(e.meta.started_at || "—")}</td>
+      <td>${escHtml(e.meta.dataset   || "—")}</td>
+      <td>${escHtml(e.meta.method    || "—")}</td>
+      <td>${e.meta.generations  || "—"}</td>
+      <td>${e.bestR2 != null ? e.bestR2 : "—"}</td>
+      <td><span class="badge bg-${badge}">${e.status}</span></td>
+      <td>
+        ${e.status === "complete"
+          ? `<button class="btn btn-sm btn-outline-primary py-0 px-1" title="Reload results"
+                     onclick="reloadHistoryJob(${JSON.stringify(e.job_id)})">
+               <i class="bi bi-arrow-clockwise"></i>
+             </button>`
+          : ""}
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+async function reloadHistoryJob(jobId) {
+  const res = await fetch(`${API}/api/jobs/${jobId}`);
+  const job = await res.json();
+  if (job.error || !job.has_models) { showToast("Models not available for this job."); return; }
+  // To reload the summary we need to call the plot endpoint which already has the models
+  // Instead, just switch the explorer source to "current" and update currentJobId
+  state.currentJobId = jobId;
+  showToast("Explorer now pointing at this job. Use Model Explorer to view plots.", "info");
+}
+
+// ── Settings presets (localStorage)
+const PRESETS_KEY = "stackgp_presets";
+
+function getAllPresets() {
+  try { return JSON.parse(localStorage.getItem(PRESETS_KEY)) || {}; }
+  catch (_) { return {}; }
+}
+function saveAllPresets(obj) {
+  localStorage.setItem(PRESETS_KEY, JSON.stringify(obj));
+}
+
+function refreshPresetsDropdown() {
+  const sel = document.getElementById("loadPresetSel");
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">— load preset —</option>';
+  Object.keys(getAllPresets()).forEach(name => {
+    const o = document.createElement("option");
+    o.value = name; o.textContent = name;
+    sel.appendChild(o);
+  });
+  if (cur) sel.value = cur;
+}
+
+function readAllSettings() {
+  return {
+    ops:                       document.getElementById("ops").value,
+    const:                     document.getElementById("const").value,
+    samplingMethod:            document.getElementById("samplingMethod").value,
+    generations:               +document.getElementById("generations").value,
+    popSize:                   +document.getElementById("popSize").value,
+    maxComplexity:             +document.getElementById("maxComplexity").value,
+    mutationRate:              +document.getElementById("mutationRate").value,
+    crossoverRate:             +document.getElementById("crossoverRate").value,
+    spawnRate:                 +document.getElementById("spawnRate").value,
+    elitismRate:               +document.getElementById("elitismRate").value,
+    tourneySize:               +document.getElementById("tourneySize").value,
+    timeLimit:                 +document.getElementById("timeLimit").value,
+    capTime:                    document.getElementById("capTime").checked,
+    align:                      document.getElementById("align").checked,
+    extinction:                 document.getElementById("extinction").checked,
+    extinctionRate:            +document.getElementById("extinctionRate").value,
+    dataSubsample:              document.getElementById("dataSubsample").checked,
+    allowEarlyTermination:      document.getElementById("allowEarlyTermination").checked,
+    earlyTerminationThreshold: +document.getElementById("earlyTerminationThreshold").value,
+    liveTrackingInterval:      +document.getElementById("liveTrackingInterval").value,
+    testSplit:                 +document.getElementById("testSplit").value,
+    evolveMethod:               document.getElementById("evolveMethod").value,
+    nJobs:                     +document.getElementById("nJobs").value,
+    cascades:                   document.getElementById("cascades").checked,
+    cascadeCount:              +document.getElementById("cascadeCount").value,
+    exchangeCount:             +document.getElementById("exchangeCount").value,
+  };
+}
+
+function applySettings(s) {
+  const setVal = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+  const setChk = (id, v) => { const el = document.getElementById(id); if (el) el.checked = v; };
+  setVal("ops",             s.ops);
+  setVal("const",           s.const);
+  setVal("samplingMethod",  s.samplingMethod);
+  setVal("generations",     s.generations);
+  setVal("popSize",         s.popSize);
+  setVal("maxComplexity",   s.maxComplexity);
+  setVal("mutationRate",    s.mutationRate);
+  setVal("crossoverRate",   s.crossoverRate);
+  setVal("spawnRate",       s.spawnRate);
+  setVal("elitismRate",     s.elitismRate);
+  setVal("tourneySize",     s.tourneySize);
+  setVal("timeLimit",       s.timeLimit);
+  setChk("capTime",         s.capTime);
+  setChk("align",           s.align);
+  setChk("extinction",      s.extinction);
+  setVal("extinctionRate",  s.extinctionRate);
+  setChk("dataSubsample",   s.dataSubsample);
+  setChk("allowEarlyTermination", s.allowEarlyTermination);
+  setVal("earlyTerminationThreshold", s.earlyTerminationThreshold);
+  setVal("liveTrackingInterval", s.liveTrackingInterval);
+  setVal("testSplit",       s.testSplit);
+  if (s.evolveMethod) {
+    setVal("evolveMethod",  s.evolveMethod);
+    document.getElementById("evolveMethod").dispatchEvent(new Event("change"));
+  }
+  setVal("nJobs",       s.nJobs);
+  setChk("cascades",    s.cascades);
+  setVal("cascadeCount", s.cascadeCount);
+  setVal("exchangeCount", s.exchangeCount);
+  updateRatesSum();
+}
+
+document.getElementById("savePresetBtn").addEventListener("click", () => {
+  const name = document.getElementById("presetName").value.trim();
+  if (!name) { showToast("Enter a preset name."); return; }
+  const presets = getAllPresets();
+  presets[name] = readAllSettings();
+  saveAllPresets(presets);
+  refreshPresetsDropdown();
+  showToast(`Preset "${name}" saved.`, "success");
+});
+
+document.getElementById("loadPresetSel").addEventListener("change", function () {
+  if (!this.value) return;
+  const presets = getAllPresets();
+  const s = presets[this.value];
+  if (!s) { showToast("Preset not found."); return; }
+  applySettings(s);
+  showToast(`Preset "${this.value}" loaded.`, "success");
+});
+
+document.getElementById("deletePresetBtn").addEventListener("click", () => {
+  const name = document.getElementById("loadPresetSel").value;
+  if (!name) { showToast("Select a preset to delete."); return; }
+  const presets = getAllPresets();
+  delete presets[name];
+  saveAllPresets(presets);
+  refreshPresetsDropdown();
+  showToast(`Preset "${name}" deleted.`, "success");
+});
 
 // ── Initialise
 (async function init() {
   await Promise.all([refreshDatasets(), refreshModelSets()]);
-  // Show/hide model-index group based on default plot type
+  refreshPresetsDropdown();
+  updateRatesSum();
   document.getElementById("plotType").dispatchEvent(new Event("change"));
 })();
 </script>

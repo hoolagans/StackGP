@@ -71,20 +71,24 @@ def _new_job():
     job_id = str(uuid.uuid4())
     job = {
         "id":         job_id,
-        "status":     "pending",  # pending | running | complete | error
+        "status":     "pending",  # pending | running | complete | error | cancelled
         "tracking":   [],         # list[float] — best fitness per generation
         "models":     None,       # serialised via dill after completion
         "error":      None,
         "queue":      queue.Queue(),   # internal SSE messages
         "generation": 0,
         "total_gens": 0,
+        "cancelled":  False,      # set True by cancel endpoint
+        "best_expr":  None,       # best model expression from latest batch
+        "meta":       {},         # arbitrary metadata (dataset, method, etc.)
     }
     with JOBS_LOCK:
         JOBS[job_id] = job
     return job
 
 
-def _model_summary_row(mod, input_data, response_data, var_names):
+def _model_summary_row(mod, input_data, response_data, var_names,
+                       test_input=None, test_response=None):
     """Return a JSON-serialisable dict describing one model."""
     try:
         expr = str(sgp.printGPModel(mod))
@@ -104,7 +108,19 @@ def _model_summary_row(mod, input_data, response_data, var_names):
         comp = int(sgp.stackGPModelComplexity(mod))
     except Exception:
         comp = None
-    return {"expression": expr, "r2": r2, "rmse": err, "complexity": comp}
+    row = {"expression": expr, "r2": r2, "rmse": err, "complexity": comp}
+    if test_input is not None and test_response is not None:
+        try:
+            tfit = float(sgp.fitness(mod, test_input, test_response))
+            row["test_r2"] = round(1.0 - tfit, 6) if math.isfinite(tfit) else None
+        except Exception:
+            row["test_r2"] = None
+        try:
+            terr = float(sgp.rmse(mod, test_input, test_response))
+            row["test_rmse"] = round(terr, 6) if math.isfinite(terr) else None
+        except Exception:
+            row["test_rmse"] = None
+    return row
 
 
 def _capture_plot(fn, *args, **kwargs):
@@ -202,8 +218,30 @@ def _evolution_worker(job: dict, df: pd.DataFrame, response_col: str,
 
         # ---- Prepare numpy arrays ----------------------------------------
         feature_cols = [c for c in df.columns if c != response_col]
-        input_data   = df[feature_cols].values.T.astype(float)   # (n_vars, n_samples)
-        response_data = df[response_col].values.astype(float)
+        all_input    = df[feature_cols].values.T.astype(float)   # (n_vars, n_samples)
+        all_response = df[response_col].values.astype(float)
+
+        # ---- Optional train/test split -----------------------------------
+        test_split_pct = float(settings.pop("testSplit", 0))
+        test_input  = None
+        test_response = None
+        if 0 < test_split_pct < 100:
+            n_total = all_input.shape[1]
+            n_test  = max(1, int(round(n_total * test_split_pct / 100.0)))
+            n_train = n_total - n_test
+            rng = np.random.default_rng(42)
+            idx = rng.permutation(n_total)
+            train_idx, test_idx = idx[:n_train], idx[n_train:]
+            input_data    = all_input[:, train_idx]
+            response_data = all_response[train_idx]
+            test_input    = all_input[:, test_idx]
+            test_response = all_response[test_idx]
+        else:
+            input_data    = all_input
+            response_data = all_response
+
+        job["test_input"]    = test_input
+        job["test_response"] = test_response
 
         # ---- Resolve string keys to StackGP objects ----------------------
         ops_key  = settings.pop("ops",  "defaultOps")
@@ -265,6 +303,12 @@ def _evolution_worker(job: dict, df: pd.DataFrame, response_col: str,
 
         # ---- Batch loop --------------------------------------------------
         while gens_done < total_gens:
+            # Check for server-side cancellation between batches
+            if job.get("cancelled"):
+                job["status"] = "cancelled"
+                q.put(json.dumps({"type": "cancelled"}))
+                return
+
             this_batch = min(batch_size, total_gens - gens_done)
 
             if use_parallel:
@@ -302,6 +346,16 @@ def _evolution_worker(job: dict, df: pd.DataFrame, response_col: str,
             job["generation"] = gens_done
             job["tracking"]   = list(tracking_all)
 
+            # Best model expression for live preview
+            best_expr = None
+            if current_models:
+                try:
+                    sorted_now = sgp.sortModels(current_models)
+                    best_expr  = str(sgp.printGPModel(sorted_now[0]))
+                    job["best_expr"] = best_expr
+                except Exception:
+                    pass
+
             best = float(min(batch_tracking)) if batch_tracking else None
             q.put(json.dumps({
                 "type":       "progress",
@@ -309,21 +363,27 @@ def _evolution_worker(job: dict, df: pd.DataFrame, response_col: str,
                 "total":      total_gens,
                 "tracking":   tracking_all,
                 "best":       best,
+                "best_expr":  best_expr,
             }))
 
         # ---- Finalise ----------------------------------------------------
         current_models = sgp.sortModels(current_models)
         job["models"]  = current_models
         job["status"]  = "complete"
+        job["input_data"]    = input_data
+        job["response_data"] = response_data
+        job["var_names"]     = var_names
 
         # Build summary rows for the top-20 models
-        summary = [_model_summary_row(m, input_data, response_data, var_names)
+        summary = [_model_summary_row(m, input_data, response_data, var_names,
+                                      test_input, test_response)
                    for m in current_models[:20]]
 
         q.put(json.dumps({
             "type":     "complete",
             "tracking": tracking_all,
             "summary":  summary,
+            "has_test_split": test_input is not None,
         }))
 
     except Exception as exc:  # noqa: BLE001
@@ -392,6 +452,49 @@ def get_dataset(name):
     })
 
 
+@app.route("/api/datasets/<name>", methods=["DELETE"])
+def delete_dataset(name):
+    path = _safe_dataset_path(name)
+    if path is None:
+        return jsonify({"error": "Invalid name"}), 400
+    if os.path.exists(path):
+        os.remove(path)
+        return jsonify({"deleted": _sanitise_name(name)})
+    return jsonify({"error": "Not found"}), 404
+
+
+@app.route("/api/datasets/<name>/stats", methods=["GET"])
+def dataset_stats(name):
+    """Return per-column statistics: mean, std, min, max, null_count."""
+    df = _load_dataset(name)
+    if df is None:
+        return jsonify({"error": "Dataset not found"}), 404
+    stats = []
+    for col in df.columns:
+        s = df[col]
+        null_count = int(s.isna().sum())
+        if pd.api.types.is_numeric_dtype(s):
+            valid = s.dropna()
+            stats.append({
+                "column":     col,
+                "mean":       round(float(valid.mean()), 6) if len(valid) else None,
+                "std":        round(float(valid.std()),  6) if len(valid) > 1 else None,
+                "min":        round(float(valid.min()),  6) if len(valid) else None,
+                "max":        round(float(valid.max()),  6) if len(valid) else None,
+                "null_count": null_count,
+            })
+        else:
+            stats.append({
+                "column":     col,
+                "mean":       None,
+                "std":        None,
+                "min":        None,
+                "max":        None,
+                "null_count": null_count,
+            })
+    return jsonify(stats)
+
+
 # ---------------------------------------------------------------------------
 # Routes — evolution
 # ---------------------------------------------------------------------------
@@ -427,6 +530,14 @@ def start_evolve():
             initial_models = loaded
 
     job = _new_job()
+    # Store metadata for history panel
+    job["meta"] = {
+        "dataset":   dataset_name,
+        "response":  response_col,
+        "method":    "parallelEvolve" if settings.get("useParallel") else "evolve",
+        "generations": int(settings.get("generations", 100)),
+        "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
     thread = threading.Thread(
         target=_evolution_worker,
         args=(job, df, response_col, settings, initial_models),
@@ -475,7 +586,21 @@ def get_job_status(job_id):
         "tracking":   job["tracking"],
         "error":      job["error"],
         "has_models": job["models"] is not None,
+        "meta":       job.get("meta", {}),
     })
+
+
+@app.route("/api/jobs/<job_id>/cancel", methods=["POST"])
+def cancel_job(job_id):
+    """Signal the evolution worker to stop after the current batch."""
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+    if job is None:
+        return jsonify({"error": "Job not found"}), 404
+    if job["status"] not in ("pending", "running"):
+        return jsonify({"error": "Job is not running"}), 400
+    job["cancelled"] = True
+    return jsonify({"cancelled": job_id})
 
 
 # ---------------------------------------------------------------------------
@@ -601,6 +726,34 @@ def generate_plot():
         "plotModelResidualDistribution":  lambda m: sgp.plotModelResidualDistribution(m, input_data, response_data),
     }
 
+    def _sensitivity_plot(model, inp, vnames):
+        """Partial-dependence (sensitivity) chart — one series per variable."""
+        n_points = 50
+        n_vars   = inp.shape[0]
+        col_means = inp.mean(axis=1)   # shape (n_vars,)
+        fig, ax = plt.subplots(figsize=(9, 5))
+        for vi in range(n_vars):
+            lo, hi = inp[vi].min(), inp[vi].max()
+            if lo == hi:
+                continue
+            sweep     = np.linspace(lo, hi, n_points)
+            x_sweep   = np.tile(col_means[:, np.newaxis], (1, n_points))
+            x_sweep[vi] = sweep
+            try:
+                preds = sgp.evaluateGPModel(model, x_sweep)
+                if not isinstance(preds, np.ndarray):
+                    preds = np.full(n_points, float(preds))
+                preds = np.where(np.isfinite(preds), preds, np.nan)
+            except Exception:
+                continue
+            label = vnames[vi] if vi < len(vnames) else f"x{vi}"
+            ax.plot(sweep, preds, label=label)
+        ax.set_xlabel("Variable value")
+        ax.set_ylabel("Model output")
+        ax.set_title("Sensitivity Analysis (partial dependence)")
+        ax.legend(loc="best", fontsize="small")
+        plt.tight_layout()
+
     try:
         if plot_type in PLOT_FUNCS:
             img = _capture_plot(PLOT_FUNCS[plot_type])
@@ -610,6 +763,12 @@ def generate_plot():
             if model_index >= len(models):
                 model_index = 0
             img = _capture_plot(DATA_PLOT_FUNCS[plot_type], models[model_index])
+        elif plot_type == "sensitivityAnalysis":
+            if input_data is None:
+                return jsonify({"error": "dataset_name and response_col required for sensitivity analysis"}), 400
+            if model_index >= len(models):
+                model_index = 0
+            img = _capture_plot(_sensitivity_plot, models[model_index], input_data, var_names)
         else:
             return jsonify({"error": f"Unknown plot type '{plot_type}'"}), 400
     except Exception:  # noqa: BLE001
