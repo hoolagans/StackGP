@@ -375,10 +375,34 @@ def _evolution_worker(job: dict, df: pd.DataFrame, response_col: str,
         job["response_data"] = response_data
         job["var_names"]     = var_names
 
-        # Build summary rows for the top-20 models
+        # Build summary rows for the Pareto front models (non-dominated in
+        # accuracy vs. complexity).  Mirror what plotModels() does internally:
+        # deep-copy, convert to list form, extract front, restore, then sort.
+        pareto_mods = copy.deepcopy(current_models)
+        if pareto_mods:
+            # Ensure each model has both fitness and complexity as objectives.
+            # mod[2] may be a list, numpy array, or a scalar depending on the
+            # evolution path, so handle all three cases safely.
+            first_obj = pareto_mods[0][2]
+            needs_complexity = (
+                not hasattr(first_obj, "__len__") or len(first_obj) < 2
+            )
+            if needs_complexity:
+                for mod in pareto_mods:
+                    obj = mod[2]
+                    fitness_val = (
+                        float(obj[0]) if hasattr(obj, "__len__") else float(obj)
+                    )
+                    mod[2] = [fitness_val, sgp.stackGPModelComplexity(mod)]
+            [sgp.modelToListForm(mod) for mod in pareto_mods]
+            pareto_front = sgp.paretoTournament(pareto_mods)
+            [sgp.modelRestoreForm(mod) for mod in pareto_front]
+            pareto_front.sort(key=lambda m: m[2][0])  # best accuracy first
+        else:
+            pareto_front = []
         summary = [_model_summary_row(m, input_data, response_data, var_names,
                                       test_input, test_response)
-                   for m in current_models[:20]]
+                   for m in pareto_front]
 
         q.put(json.dumps({
             "type":     "complete",

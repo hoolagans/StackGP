@@ -17,16 +17,15 @@
     rel="stylesheet"
     crossorigin="anonymous"
   />
-  <!-- Chart.js -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"
-          crossorigin="anonymous"></script>
+  <!-- Chart.js (vendored locally so the app works without internet access) -->
+  <script src="/vendor/chart.umd.min.js"></script>
 
   <style>
     :root {
-      --brand: #5c6bc0;
-      --brand-dark: #3949ab;
+      --brand: #3aadb5;
+      --brand-dark: #246e76;
     }
-    body { background: #f5f6fa; }
+    body { background: #f0f7f8; }
     .navbar-brand { font-weight: 700; letter-spacing: .05em; }
     .section-card {
       border: none;
@@ -56,7 +55,7 @@
       position: fixed; top: 1rem; right: 1rem; z-index: 9999;
       display: flex; flex-direction: column; gap: .5rem;
     }
-    .model-table th { background: #e8eaf6; }
+    .model-table th { background: #d8eff1; }
     .status-badge { font-size: .75rem; }
     #runBtn { min-width: 180px; }
     .preview-table { font-size: .8rem; }
@@ -73,7 +72,19 @@
 <!-- ─── Navbar ─────────────────────────────────────────────────────────── -->
 <nav class="navbar navbar-dark" style="background:var(--brand-dark);">
   <div class="container-fluid">
-    <span class="navbar-brand"><i class="bi bi-cpu me-2"></i>StackGP Evolution Interface</span>
+    <span class="navbar-brand d-flex align-items-center">
+      <!-- StackGP logo: three teal stacked layers with DNA double helix -->
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 38" height="32" class="me-2 flex-shrink-0" aria-hidden="true">
+        <rect x="1" y="26" width="38" height="11" rx="2.5" fill="#246e76"/>
+        <rect x="1" y="14" width="38" height="11" rx="2.5" fill="#3aadb5"/>
+        <rect x="1" y="2"  width="38" height="11" rx="2.5" fill="#62c5cd"/>
+        <path d="M7 34 Q20 30 33 26 Q20 19 7 14 Q20 9 33 5"
+              stroke="#1c3440" stroke-width="2.2" fill="none" stroke-linecap="round"/>
+        <path d="M33 34 Q20 30 7 26 Q20 19 33 14 Q20 9 7 5"
+              stroke="#1c3440" stroke-width="2.2" fill="none" stroke-linecap="round"/>
+      </svg>
+      StackGP
+    </span>
     <span id="statusBadge" class="badge bg-secondary status-badge">Idle</span>
   </div>
 </nav>
@@ -398,7 +409,7 @@
   <!-- ─── 5. Results ──────────────────────────────────────────────────── -->
   <div class="card section-card">
     <div class="card-header">
-      <span class="section-number">4</span>Results &amp; Model Sets
+      <span class="section-number">4</span>Results &amp; Model Sets — Pareto Front
     </div>
     <div class="card-body">
 
@@ -421,7 +432,7 @@
         </div>
       </div>
 
-      <!-- Top models table -->
+      <!-- Pareto front models table -->
       <div class="table-responsive">
         <table class="table table-sm table-hover model-table" id="modelsTable">
           <thead id="modelsTableHead">
@@ -606,8 +617,8 @@ try {
         {
           label: "Best Fitness (1 − R²)",
           data: [],
-          borderColor: "#5c6bc0",
-          backgroundColor: "rgba(92,107,192,.1)",
+          borderColor: "#3aadb5",
+          backgroundColor: "rgba(58,173,181,.1)",
           fill: true,
           tension: 0.3,
           pointRadius: 2,
@@ -615,7 +626,7 @@ try {
         {
           label: "Previous run",
           data: [],
-          borderColor: "rgba(92,107,192,.3)",
+          borderColor: "rgba(58,173,181,.35)",
           backgroundColor: "transparent",
           borderDash: [4, 4],
           fill: false,
@@ -1077,7 +1088,7 @@ function populateModelsTable(rows, showTest = false) {
   const tbody = document.getElementById("modelsBody");
   tbody.innerHTML = "";
   if (!rows || rows.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="7" class="text-muted text-center">No models returned.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" class="text-muted text-center">No Pareto front models returned.</td></tr>';
     return;
   }
   rows.forEach((r, i) => {
