@@ -6,6 +6,7 @@ to a browser-based front-end.
 """
 
 import copy
+import datetime
 import io
 import json
 import math
@@ -536,7 +537,7 @@ def start_evolve():
         "response":  response_col,
         "method":    "parallelEvolve" if settings.get("useParallel") else "evolve",
         "generations": int(settings.get("generations", 100)),
-        "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "started_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
     thread = threading.Thread(
         target=_evolution_worker,

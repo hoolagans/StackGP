@@ -586,6 +586,13 @@ let state = {
   jobHistory:     [],     // [{job_id, meta, bestR2, status}]
 };
 
+// Hide the "Previous run" legend entry when there is no ghost data
+function filterEmptyPreviousRunLegend(item, chart) {
+  return item.datasetIndex === 1
+    ? chart.data.datasets[1].data.length > 0
+    : true;
+}
+
 // ── Chart.js setup
 const ctx = document.getElementById("trackingChart").getContext("2d");
 const trackingChart = new Chart(ctx, {
@@ -621,7 +628,7 @@ const trackingChart = new Chart(ctx, {
       x: { title: { display: true, text: "Generation" } },
       y: { title: { display: true, text: "Fitness (1 − R²)" } },
     },
-    plugins: { legend: { display: true, labels: { filter: item => item.datasetIndex === 1 ? item.chart.data.datasets[1].data.length > 0 : true } } },
+    plugins: { legend: { display: true, labels: { filter: filterEmptyPreviousRunLegend } } },
   }
 });
 
