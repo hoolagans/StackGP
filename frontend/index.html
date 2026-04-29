@@ -48,6 +48,11 @@
     }
     #trackingChart { max-height: 320px; }
     #plotImg { max-width: 100%; border-radius: .5rem; display: none; }
+    /* Toast container for accessible error/info messages */
+    #toastContainer {
+      position: fixed; top: 1rem; right: 1rem; z-index: 9999;
+      display: flex; flex-direction: column; gap: .5rem;
+    }
     .model-table th { background: #e8eaf6; }
     .status-badge { font-size: .75rem; }
     #runBtn { min-width: 180px; }
@@ -58,6 +63,9 @@
   </style>
 </head>
 <body>
+
+<!-- Accessible toast notification container -->
+<div id="toastContainer" role="alert" aria-live="assertive" aria-atomic="true"></div>
 
 <!-- ─── Navbar ─────────────────────────────────────────────────────────── -->
 <nav class="navbar navbar-dark" style="background:var(--brand-dark);">
@@ -442,6 +450,26 @@
 // ── API base URL (auto-detect: same origin when served by Flask)
 const API = window.location.origin;
 
+// ── Accessible toast notifications (replaces alert())
+function showToast(message, type = "danger") {
+  const container = document.getElementById("toastContainer");
+  const id = `toast-${Date.now()}`;
+  const bgClass = type === "success" ? "bg-success" : type === "info" ? "bg-info" : "bg-danger";
+  const html = `
+    <div id="${id}" class="toast align-items-center text-white ${bgClass} border-0 show"
+         role="alert" aria-live="assertive" aria-atomic="true">
+      <div class="d-flex">
+        <div class="toast-body">${escHtml(message)}</div>
+        <button type="button" class="btn-close btn-close-white me-2 m-auto"
+                data-bs-dismiss="toast" aria-label="Close"></button>
+      </div>
+    </div>`;
+  container.insertAdjacentHTML("beforeend", html);
+  const el = document.getElementById(id);
+  // Auto-dismiss after 6 s
+  setTimeout(() => el && el.remove(), 6000);
+}
+
 // ── State
 let state = {
   datasetName:  null,
@@ -529,14 +557,14 @@ async function refreshModelSets() {
 // ── Dataset upload
 document.getElementById("uploadBtn").addEventListener("click", async () => {
   const file = document.getElementById("csvFile").files[0];
-  if (!file) return alert("Please choose a CSV file first.");
+  if (!file) { showToast("Please choose a CSV file first.", "danger"); return; }
   const form = new FormData();
   form.append("file", file);
   showSpinner("runSpinner", false);
   setStatus("Uploading…", "info");
   const res  = await fetch(`${API}/api/upload`, { method: "POST", body: form });
   const data = await res.json();
-  if (data.error) { alert(data.error); setStatus("Idle"); return; }
+  if (data.error) { showToast(data.error); setStatus("Idle"); return; }
   applyDataset(data);
   refreshDatasets();
   setStatus("Idle");
@@ -547,9 +575,7 @@ document.getElementById("existingDataset").addEventListener("change", async func
   if (!this.value) return;
   const res  = await fetch(`${API}/api/datasets/${this.value}`);
   const data = await res.json();
-  if (data.error) { alert(data.error); return; }
-  applyDataset(data);
-});
+  if (data.error) { showToast(data.error); return; }
 
 function applyDataset(data) {
   state.datasetName = data.name;
@@ -617,7 +643,10 @@ document.getElementById("runBtn").addEventListener("click", startEvolution);
 async function startEvolution() {
   const datasetName = state.datasetName;
   const responseCol = document.getElementById("responseCol").value;
-  if (!datasetName || !responseCol) return alert("Please load a dataset and choose a response column.");
+  if (!datasetName || !responseCol) {
+    showToast("Please load a dataset and choose a response column.");
+    return;
+  }
 
   const useParallel = document.getElementById("evolveMethod").value === "parallelEvolve";
 
@@ -669,7 +698,7 @@ async function startEvolution() {
     body:    JSON.stringify({ dataset_name: datasetName, response_col: responseCol, settings, seed_models: seedModels }),
   });
   const { job_id, error } = await resp.json();
-  if (error) { alert(error); resetRunBtn(); return; }
+  if (error) { showToast(error); resetRunBtn(); return; }
 
   state.currentJobId = job_id;
   openSSE(job_id);
@@ -700,7 +729,7 @@ function openSSE(jobId) {
     }
     if (msg.type === "error") {
       setStatus("Error", "danger");
-      alert("Evolution error:\n" + msg.message);
+      showToast("Evolution error: " + msg.message);
       resetRunBtn();
       es.close();
     }
@@ -774,15 +803,15 @@ function escHtml(s) {
 // ── Save models
 document.getElementById("saveBtn").addEventListener("click", async () => {
   const name = document.getElementById("saveModelName").value.trim();
-  if (!name) { alert("Enter a name for the model set."); return; }
-  if (!state.currentJobId) { alert("No job available."); return; }
+  if (!name) { showToast("Enter a name for the model set."); return; }
+  if (!state.currentJobId) { showToast("No job available."); return; }
   const res = await fetch(`${API}/api/models/${encodeURIComponent(name)}`, {
     method:  "POST",
     headers: { "Content-Type": "application/json" },
     body:    JSON.stringify({ job_id: state.currentJobId }),
   });
   const data = await res.json();
-  if (data.error) { alert(data.error); return; }
+  if (data.error) { showToast(data.error); return; }
   document.getElementById("saveMsg").textContent = `✓ Saved as "${data.saved}"`;
   refreshModelSets();
 });
@@ -803,7 +832,7 @@ async function generatePlot() {
   };
 
   if (source === "current") {
-    if (!state.currentJobId) { alert("Run evolution first."); return; }
+    if (!state.currentJobId) { showToast("Run evolution first."); return; }
     body.job_id = state.currentJobId;
   } else {
     body.models_name = source;

@@ -24,6 +24,7 @@ import numpy as np
 import pandas as pd
 from flask import Flask, jsonify, request, Response, send_from_directory
 from flask_cors import CORS
+from werkzeug.utils import secure_filename
 
 import StackGP as sgp
 
@@ -128,42 +129,59 @@ def _capture_plot(fn, *args, **kwargs):
 
 def _sanitise_name(name: str) -> str:
     """
-    Strip any path components and allow only alphanumerics, hyphens, and
-    underscores so that user-supplied names cannot escape the storage directories.
+    Use werkzeug's secure_filename to strip path separators and special
+    characters, then additionally limit to alphanumerics, hyphens, and
+    underscores so that user-supplied names cannot escape the storage dirs.
     """
-    base = os.path.basename(name)          # no directory traversal
+    base = secure_filename(name)
     return "".join(c if c.isalnum() or c in "-_" else "_" for c in base)
 
 
-def _load_models(name: str):
+def _safe_models_path(name: str) -> str | None:
+    """Return the absolute path for a model file, or None if unsafe."""
     safe = _sanitise_name(name)
-    path = os.path.join(MODELS_DIR, f"{safe}.dill")
-    # Confirm the resolved path is inside MODELS_DIR
-    if not os.path.realpath(path).startswith(os.path.realpath(MODELS_DIR)):
+    if not safe:
         return None
-    if not os.path.exists(path):
+    candidate = os.path.join(MODELS_DIR, f"{safe}.dill")
+    real_models = os.path.realpath(MODELS_DIR)
+    real_candidate = os.path.realpath(candidate)
+    if not real_candidate.startswith(real_models + os.sep) and real_candidate != real_models:
+        return None
+    return candidate
+
+
+def _safe_dataset_path(name: str) -> str | None:
+    """Return the absolute path for a dataset file, or None if unsafe."""
+    safe = _sanitise_name(name)
+    if not safe:
+        return None
+    candidate = os.path.join(DATASETS_DIR, f"{safe}.csv")
+    real_datasets = os.path.realpath(DATASETS_DIR)
+    real_candidate = os.path.realpath(candidate)
+    if not real_candidate.startswith(real_datasets + os.sep) and real_candidate != real_datasets:
+        return None
+    return candidate
+
+
+def _load_models(name: str):
+    path = _safe_models_path(name)
+    if path is None or not os.path.exists(path):
         return None
     with open(path, "rb") as f:
         return dill.load(f)
 
 
 def _save_models_to_disk(name: str, models):
-    safe = _sanitise_name(name)
-    path = os.path.join(MODELS_DIR, f"{safe}.dill")
-    # Confirm the resolved path is inside MODELS_DIR
-    if not os.path.realpath(path).startswith(os.path.realpath(MODELS_DIR)):
+    path = _safe_models_path(name)
+    if path is None:
         raise ValueError("Invalid model set name")
     with open(path, "wb") as f:
         dill.dump(models, f)
 
 
 def _load_dataset(name: str):
-    safe = _sanitise_name(name)
-    path = os.path.join(DATASETS_DIR, f"{safe}.csv")
-    # Confirm the resolved path is inside DATASETS_DIR
-    if not os.path.realpath(path).startswith(os.path.realpath(DATASETS_DIR)):
-        return None
-    if not os.path.exists(path):
+    path = _safe_dataset_path(name)
+    if path is None or not os.path.exists(path):
         return None
     return pd.read_csv(path)
 
@@ -259,8 +277,13 @@ def _evolution_worker(job: dict, df: pd.DataFrame, response_col: str,
                 if isinstance(result, list) and len(result) > 0 and isinstance(result[0], tuple):
                     runs, trackings = zip(*result)
                     current_models = [m for sublist in runs for m in sublist]
-                    batch_tracking = [min(t[i] for t in trackings if i < len(t))
-                                      for i in range(max(len(t) for t in trackings))]
+                    non_empty = [t for t in trackings if len(t) > 0]
+                    if non_empty:
+                        max_len = max(len(t) for t in non_empty)
+                        batch_tracking = [min(t[i] for t in non_empty if i < len(t))
+                                          for i in range(max_len)]
+                    else:
+                        batch_tracking = []
                 else:
                     current_models = result if isinstance(result, list) else list(result)
                     batch_tracking = []
@@ -333,9 +356,8 @@ def upload_dataset():
         return jsonify({"error": "Empty filename"}), 400
 
     safe_name = _sanitise_name(os.path.splitext(file.filename)[0])
-    save_path = os.path.join(DATASETS_DIR, f"{safe_name}.csv")
-    # Confirm the resolved path stays inside DATASETS_DIR
-    if not os.path.realpath(save_path).startswith(os.path.realpath(DATASETS_DIR)):
+    save_path = _safe_dataset_path(safe_name)
+    if save_path is None:
         return jsonify({"error": "Invalid filename"}), 400
     file.save(save_path)
 
@@ -483,14 +505,12 @@ def save_model_set(name):
 
 @app.route("/api/models/<name>", methods=["DELETE"])
 def delete_model_set(name):
-    safe = _sanitise_name(name)
-    path = os.path.join(MODELS_DIR, f"{safe}.dill")
-    # Confirm the resolved path stays inside MODELS_DIR
-    if not os.path.realpath(path).startswith(os.path.realpath(MODELS_DIR)):
+    path = _safe_models_path(name)
+    if path is None:
         return jsonify({"error": "Invalid name"}), 400
     if os.path.exists(path):
         os.remove(path)
-        return jsonify({"deleted": safe})
+        return jsonify({"deleted": _sanitise_name(name)})
     return jsonify({"error": "Not found"}), 404
 
 
@@ -590,9 +610,9 @@ def generate_plot():
             img = _capture_plot(DATA_PLOT_FUNCS[plot_type], models[model_index])
         else:
             return jsonify({"error": f"Unknown plot type '{plot_type}'"}), 400
-    except (ValueError, KeyError, RuntimeError, TypeError) as exc:
+    except (ValueError, KeyError, RuntimeError, TypeError):
         app.logger.exception("Plot generation failed")
-        return jsonify({"error": str(exc)}), 500
+        return jsonify({"error": "Plot generation failed. Check that your data and models are valid."}), 500
     except Exception:  # noqa: BLE001
         app.logger.exception("Plot generation failed with unexpected error")
         return jsonify({"error": "An unexpected error occurred while generating the plot."}), 500
