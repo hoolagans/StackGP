@@ -227,7 +227,12 @@ def _evolution_worker(job: dict, df: pd.DataFrame, response_col: str,
         job["total_gens"] = total_gens
 
         # ---- Common kwargs -----------------------------------------------
-        common_kwargs = dict(
+        # Serial evolve: use returnTracking so we get fitness history per batch.
+        # Parallel evolve: must NOT include returnTracking — parallelEvolve only
+        # strips (models, tracking) tuples when kwargs["tracking"] is True, so
+        # passing returnTracking=True causes evolve() to return tuples that are
+        # never unzipped, corrupting the flat model list and crashing sortModels.
+        base_kwargs = dict(
             ops            = ops_fn,
             const          = const_fn,
             mutationRate   = int(settings.get("mutationRate", 79)),
@@ -246,11 +251,14 @@ def _evolution_worker(job: dict, df: pd.DataFrame, response_col: str,
             samplingMethod = samp_fn,
             allowEarlyTermination   = bool(settings.get("allowEarlyTermination", False)),
             earlyTerminationThreshold = float(settings.get("earlyTerminationThreshold", 0)),
-            returnTracking = True,
             liveTracking   = False,
             tracking       = False,
             variableNames  = var_names,
         )
+        # Serial path gets returnTracking so we can stream fitness per batch.
+        serial_extra   = {"returnTracking": True}
+        # Parallel path must NOT pass returnTracking (see comment above).
+        parallel_extra = {"returnTracking": False}
 
         tracking_all: list = []
         current_models     = list(initial_models) if initial_models else []
@@ -260,11 +268,10 @@ def _evolution_worker(job: dict, df: pd.DataFrame, response_col: str,
         while gens_done < total_gens:
             this_batch = min(batch_size, total_gens - gens_done)
 
-            batch_kwargs = dict(common_kwargs)
-            batch_kwargs["generations"]  = this_batch
-            batch_kwargs["initialPop"]   = copy.deepcopy(current_models)
-
             if use_parallel:
+                batch_kwargs = {**base_kwargs, **parallel_extra,
+                                "generations": this_batch,
+                                "initialPop":  copy.deepcopy(current_models)}
                 result = sgp.parallelEvolve(
                     input_data, response_data,
                     n_jobs        = n_jobs,
@@ -273,21 +280,13 @@ def _evolution_worker(job: dict, df: pd.DataFrame, response_col: str,
                     exchangeCount = exchange_count,
                     **batch_kwargs,
                 )
-                # parallelEvolve with returnTracking returns list of (models, tracking) tuples
-                if isinstance(result, list) and len(result) > 0 and isinstance(result[0], tuple):
-                    runs, trackings = zip(*result)
-                    current_models = [m for sublist in runs for m in sublist]
-                    non_empty = [t for t in trackings if len(t) > 0]
-                    if non_empty:
-                        max_len = max(len(t) for t in non_empty)
-                        batch_tracking = [min(t[i] for t in non_empty if i < len(t))
-                                          for i in range(max_len)]
-                    else:
-                        batch_tracking = []
-                else:
-                    current_models = result if isinstance(result, list) else list(result)
-                    batch_tracking = []
+                # parallelEvolve always returns a plain sorted models list
+                current_models = result if isinstance(result, list) else list(result)
+                batch_tracking = []
             else:
+                batch_kwargs = {**base_kwargs, **serial_extra,
+                                "generations": this_batch,
+                                "initialPop":  copy.deepcopy(current_models)}
                 result = sgp.evolve(input_data, response_data, **batch_kwargs)
                 if isinstance(result, tuple):
                     current_models, batch_tracking = result
