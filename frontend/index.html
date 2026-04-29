@@ -593,44 +593,50 @@ function filterEmptyPreviousRunLegend(item, chart) {
     : true;
 }
 
-// ── Chart.js setup
-const ctx = document.getElementById("trackingChart").getContext("2d");
-const trackingChart = new Chart(ctx, {
-  type: "line",
-  data: {
-    labels: [],
-    datasets: [
-      {
-        label: "Best Fitness (1 − R²)",
-        data: [],
-        borderColor: "#5c6bc0",
-        backgroundColor: "rgba(92,107,192,.1)",
-        fill: true,
-        tension: 0.3,
-        pointRadius: 2,
-      },
-      {
-        label: "Previous run",
-        data: [],
-        borderColor: "rgba(92,107,192,.3)",
-        backgroundColor: "transparent",
-        borderDash: [4, 4],
-        fill: false,
-        tension: 0.3,
-        pointRadius: 0,
-      }
-    ]
-  },
-  options: {
-    animation: false,
-    responsive: true,
-    scales: {
-      x: { title: { display: true, text: "Generation" } },
-      y: { title: { display: true, text: "Fitness (1 − R²)" } },
+// ── Chart.js setup (wrapped in try-catch so a CDN failure cannot block
+//    the rest of the script — event listeners must always be attached)
+let trackingChart = null;
+try {
+  const ctx = document.getElementById("trackingChart").getContext("2d");
+  trackingChart = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels: [],
+      datasets: [
+        {
+          label: "Best Fitness (1 − R²)",
+          data: [],
+          borderColor: "#5c6bc0",
+          backgroundColor: "rgba(92,107,192,.1)",
+          fill: true,
+          tension: 0.3,
+          pointRadius: 2,
+        },
+        {
+          label: "Previous run",
+          data: [],
+          borderColor: "rgba(92,107,192,.3)",
+          backgroundColor: "transparent",
+          borderDash: [4, 4],
+          fill: false,
+          tension: 0.3,
+          pointRadius: 0,
+        }
+      ]
     },
-    plugins: { legend: { display: true, labels: { filter: filterEmptyPreviousRunLegend } } },
-  }
-});
+    options: {
+      animation: false,
+      responsive: true,
+      scales: {
+        x: { title: { display: true, text: "Generation" } },
+        y: { title: { display: true, text: "Fitness (1 − R²)" } },
+      },
+      plugins: { legend: { display: true, labels: { filter: filterEmptyPreviousRunLegend } } },
+    }
+  });
+} catch (e) {
+  console.warn("Chart.js failed to initialize — live chart unavailable:", e);
+}
 
 // ── Utility helpers
 function setStatus(text, color = "secondary") {
@@ -917,7 +923,7 @@ async function startEvolution() {
   const seedName   = (seedModels && seedModels !== "_latest_job_") ? seedModels : null;
 
   // Copy previous run data to ghost series before reset
-  const prevData = trackingChart.data.datasets[0].data.slice();
+  const prevData = trackingChart ? trackingChart.data.datasets[0].data.slice() : [];
   resetTrackingChart(prevData);
 
   clearModelsTable();
@@ -978,14 +984,14 @@ function openSSE(jobId) {
     }
     if (msg.type === "cancelled") {
       setStatus("Cancelled", "secondary");
-      addJobHistory(jobId, trackingChart.data.datasets[0].data, "cancelled");
+      addJobHistory(jobId, trackingChart ? trackingChart.data.datasets[0].data : [], "cancelled");
       resetRunBtn();
       es.close();
     }
     if (msg.type === "error") {
       setStatus("Error", "danger");
       showToast("Evolution error: " + msg.message);
-      addJobHistory(jobId, trackingChart.data.datasets[0].data, "error");
+      addJobHistory(jobId, trackingChart ? trackingChart.data.datasets[0].data : [], "error");
       resetRunBtn();
       es.close();
     }
@@ -1014,6 +1020,7 @@ function resetRunBtn() {
 
 // ── Tracking chart helpers
 function resetTrackingChart(prevData) {
+  if (!trackingChart) return;
   // Move current run to ghost series
   if (prevData && prevData.length > 0) {
     trackingChart.data.datasets[1].data   = prevData;
@@ -1027,6 +1034,7 @@ function resetTrackingChart(prevData) {
 }
 
 function updateTrackingChart(tracking, generation, total) {
+  if (!trackingChart) return;
   trackingChart.data.labels = tracking.map((_, i) => i + 1);
   trackingChart.data.datasets[0].data = tracking;
   trackingChart.update();
