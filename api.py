@@ -13,7 +13,6 @@ import os
 import queue
 import threading
 import time
-import traceback
 import uuid
 
 import base64
@@ -127,8 +126,21 @@ def _capture_plot(fn, *args, **kwargs):
     return img
 
 
+def _sanitise_name(name: str) -> str:
+    """
+    Strip any path components and allow only alphanumerics, hyphens, and
+    underscores so that user-supplied names cannot escape the storage directories.
+    """
+    base = os.path.basename(name)          # no directory traversal
+    return "".join(c if c.isalnum() or c in "-_" else "_" for c in base)
+
+
 def _load_models(name: str):
-    path = os.path.join(MODELS_DIR, f"{name}.dill")
+    safe = _sanitise_name(name)
+    path = os.path.join(MODELS_DIR, f"{safe}.dill")
+    # Confirm the resolved path is inside MODELS_DIR
+    if not os.path.realpath(path).startswith(os.path.realpath(MODELS_DIR)):
+        return None
     if not os.path.exists(path):
         return None
     with open(path, "rb") as f:
@@ -136,13 +148,21 @@ def _load_models(name: str):
 
 
 def _save_models_to_disk(name: str, models):
-    path = os.path.join(MODELS_DIR, f"{name}.dill")
+    safe = _sanitise_name(name)
+    path = os.path.join(MODELS_DIR, f"{safe}.dill")
+    # Confirm the resolved path is inside MODELS_DIR
+    if not os.path.realpath(path).startswith(os.path.realpath(MODELS_DIR)):
+        raise ValueError("Invalid model set name")
     with open(path, "wb") as f:
         dill.dump(models, f)
 
 
 def _load_dataset(name: str):
-    path = os.path.join(DATASETS_DIR, f"{name}.csv")
+    safe = _sanitise_name(name)
+    path = os.path.join(DATASETS_DIR, f"{safe}.csv")
+    # Confirm the resolved path is inside DATASETS_DIR
+    if not os.path.realpath(path).startswith(os.path.realpath(DATASETS_DIR)):
+        return None
     if not os.path.exists(path):
         return None
     return pd.read_csv(path)
@@ -282,10 +302,10 @@ def _evolution_worker(job: dict, df: pd.DataFrame, response_col: str,
         }))
 
     except Exception as exc:  # noqa: BLE001
-        tb = traceback.format_exc()
+        app.logger.exception("Evolution worker failed")
         job["status"] = "error"
         job["error"]  = str(exc)
-        q.put(json.dumps({"type": "error", "message": str(exc), "traceback": tb}))
+        q.put(json.dumps({"type": "error", "message": str(exc)}))
     finally:
         q.put(None)   # sentinel — SSE generator will close stream
 
@@ -312,10 +332,11 @@ def upload_dataset():
     if not file.filename:
         return jsonify({"error": "Empty filename"}), 400
 
-    name = os.path.splitext(file.filename)[0]
-    # sanitise name
-    safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in name)
+    safe_name = _sanitise_name(os.path.splitext(file.filename)[0])
     save_path = os.path.join(DATASETS_DIR, f"{safe_name}.csv")
+    # Confirm the resolved path stays inside DATASETS_DIR
+    if not os.path.realpath(save_path).startswith(os.path.realpath(DATASETS_DIR)):
+        return jsonify({"error": "Invalid filename"}), 400
     file.save(save_path)
 
     df = pd.read_csv(save_path)
@@ -455,17 +476,21 @@ def save_model_set(name):
         job = JOBS.get(job_id)
     if job is None or job["models"] is None:
         return jsonify({"error": "No models available for that job"}), 404
-    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in name)
+    safe = _sanitise_name(name)
     _save_models_to_disk(safe, job["models"])
     return jsonify({"saved": safe})
 
 
 @app.route("/api/models/<name>", methods=["DELETE"])
 def delete_model_set(name):
-    path = os.path.join(MODELS_DIR, f"{name}.dill")
+    safe = _sanitise_name(name)
+    path = os.path.join(MODELS_DIR, f"{safe}.dill")
+    # Confirm the resolved path stays inside MODELS_DIR
+    if not os.path.realpath(path).startswith(os.path.realpath(MODELS_DIR)):
+        return jsonify({"error": "Invalid name"}), 400
     if os.path.exists(path):
         os.remove(path)
-        return jsonify({"deleted": name})
+        return jsonify({"deleted": safe})
     return jsonify({"error": "Not found"}), 404
 
 
@@ -565,8 +590,12 @@ def generate_plot():
             img = _capture_plot(DATA_PLOT_FUNCS[plot_type], models[model_index])
         else:
             return jsonify({"error": f"Unknown plot type '{plot_type}'"}), 400
-    except Exception as exc:  # noqa: BLE001
-        return jsonify({"error": str(exc), "traceback": traceback.format_exc()}), 500
+    except (ValueError, KeyError, RuntimeError, TypeError) as exc:
+        app.logger.exception("Plot generation failed")
+        return jsonify({"error": str(exc)}), 500
+    except Exception:  # noqa: BLE001
+        app.logger.exception("Plot generation failed with unexpected error")
+        return jsonify({"error": "An unexpected error occurred while generating the plot."}), 500
 
     return jsonify({"image": img, "format": "png"})
 
