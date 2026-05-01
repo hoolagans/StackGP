@@ -729,6 +729,40 @@ def save_model_set(name):
     return jsonify({"saved": safe})
 
 
+@app.route("/api/models/combine", methods=["POST"])
+def combine_model_sets():
+    """
+    Body (JSON): { "names": ["set1", "set2", ...], "save_as": "combined_name" }
+    Loads all named model sets, concatenates them, and saves under save_as.
+    """
+    body    = request.get_json(force=True)
+    names   = body.get("names", [])
+    save_as = str(body.get("save_as", "")).strip()
+
+    if not names or len(names) < 2:
+        return jsonify({"error": "Provide at least two model set names to combine"}), 400
+    if not save_as:
+        return jsonify({"error": "save_as name is required"}), 400
+
+    combined = []
+    missing  = []
+    for name in names:
+        models = _load_models(name)
+        if models is None:
+            missing.append(name)
+        else:
+            combined.extend(models)
+
+    if missing:
+        return jsonify({"error": f"Model sets not found: {', '.join(missing)}"}), 404
+    if not combined:
+        return jsonify({"error": "No models found in the specified sets"}), 400
+
+    safe = _sanitise_name(save_as)
+    _save_models_to_disk(safe, combined)
+    return jsonify({"saved": safe, "count": len(combined)})
+
+
 @app.route("/api/models/<name>", methods=["DELETE"])
 def delete_model_set(name):
     path = _safe_models_path(name)

@@ -446,10 +446,43 @@
           </tbody>
         </table>
       </div>
+      <!-- Combine saved model sets -->
+      <div class="accordion accordion-flush mt-3" id="combineAccordion">
+        <div class="accordion-item border rounded">
+          <h2 class="accordion-header">
+            <button class="accordion-button collapsed py-2" type="button"
+                    data-bs-toggle="collapse" data-bs-target="#combineBody">
+              <i class="bi bi-intersect me-2"></i>Combine Saved Model Sets
+            </button>
+          </h2>
+          <div id="combineBody" class="accordion-collapse collapse">
+            <div class="accordion-body">
+              <div class="row g-2 align-items-end">
+                <div class="col-md-5">
+                  <label class="form-label fw-semibold mb-1">Select sets to combine
+                    <span class="text-muted fw-normal">(hold Ctrl / ⌘ for multi-select)</span>
+                  </label>
+                  <select class="form-select" id="combineModelSel" multiple size="4">
+                  </select>
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label fw-semibold mb-1">Save combined set as</label>
+                  <input type="text" class="form-control" id="combineOutputName"
+                         placeholder="combined_set_name" />
+                </div>
+                <div class="col-md-3 d-flex align-items-end">
+                  <button class="btn btn-primary w-100" id="combineBtn">
+                    <i class="bi bi-intersect me-1"></i>Combine &amp; Save
+                  </button>
+                </div>
+              </div>
+              <div id="combineMsg" class="mt-2 small text-muted"></div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
-  </div>
-
-  <!-- ─── 6. Model Explorer ────────────────────────────────────────────── -->
+  </div> ────────────────────────────────────────────── -->
   <div class="card section-card">
     <div class="card-header">
       <span class="section-number">5</span>Model Explorer
@@ -715,6 +748,11 @@ async function refreshModelSets() {
     const o = document.createElement("option"); o.value = "current"; o.textContent = "Current job (latest run)"; return o;
   })());
 
+  // Remember previously selected items in the combine multi-select
+  const combineSel = document.getElementById("combineModelSel");
+  const prevCombine = new Set(Array.from(combineSel.selectedOptions).map(o => o.value));
+  combineSel.innerHTML = "";
+
   list.forEach(n => {
     const oSeed = document.createElement("option");
     oSeed.value = n; oSeed.textContent = n;
@@ -722,6 +760,10 @@ async function refreshModelSets() {
     const oEx = document.createElement("option");
     oEx.value = n; oEx.textContent = n;
     exSel.appendChild(oEx);
+    const oCombine = document.createElement("option");
+    oCombine.value = n; oCombine.textContent = n;
+    if (prevCombine.has(n)) oCombine.selected = true;
+    combineSel.appendChild(oCombine);
   });
   // Restore selection if it still exists
   if (prevSeed && seedSel.querySelector(`option[value="${CSS.escape(prevSeed)}"]`)) {
@@ -1173,6 +1215,31 @@ document.getElementById("saveBtn").addEventListener("click", async () => {
   const data = await res.json();
   if (data.error) { showToast(data.error); return; }
   document.getElementById("saveMsg").textContent = `✓ Saved as "${data.saved}"`;
+  refreshModelSets();
+});
+
+// ── Combine saved model sets
+document.getElementById("combineBtn").addEventListener("click", async () => {
+  const sel   = document.getElementById("combineModelSel");
+  const names = Array.from(sel.selectedOptions).map(o => o.value);
+  const saveAs = document.getElementById("combineOutputName").value.trim();
+  const msg   = document.getElementById("combineMsg");
+
+  if (names.length < 2) { showToast("Select at least two model sets to combine."); return; }
+  if (!saveAs)           { showToast("Enter a name for the combined model set."); return; }
+
+  msg.textContent = "Combining…";
+  const res  = await fetch(`${API}/api/models/combine`, {
+    method:  "POST",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify({ names, save_as: saveAs }),
+  });
+  const data = await res.json();
+  if (data.error) { showToast(data.error); msg.textContent = ""; return; }
+  msg.textContent = `✓ Saved "${data.saved}" (${data.count} models total)`;
+  document.getElementById("combineOutputName").value = "";
+  // Deselect all options
+  Array.from(sel.options).forEach(o => { o.selected = false; });
   refreshModelSets();
 });
 
