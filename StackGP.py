@@ -1478,21 +1478,44 @@ def parallelEvolve(*args,n_jobs=-1,avail_cores=-1, cascades=False, cascadeCount=
             if n_jobs <= 16:  # Only show legend if there are a reasonable number of jobs
                 plt.legend()
             plt.show()
+        flat = [model for sublist in runs for model in sublist]
+        if "returnTracking" in kwargs and kwargs["returnTracking"]:
+            # Combine per-job tracking into a single series (element-wise minimum)
+            non_empty = [b for b in bestFits if len(b) > 0]
+            if non_empty:
+                max_len = max(len(b) for b in non_empty)
+                combined = [min(b[i] for b in non_empty if i < len(b)) for i in range(max_len)]
+            else:
+                combined = []
+            return sortModels(flat), combined
 
     else:    
         runs = Parallel(n_jobs=avail_cores, backend="loky")(delayed(evolve)(*args, **kwargs) for _ in range(n_jobs))
-        if ("tracking" in kwargs and kwargs["tracking"]):
-            runs, tracking = zip(*runs)
-            # plot tracking for each job
-            plt.figure(figsize=(12, 6))
-            for i, track in enumerate(tracking):
-                plt.plot(track, label=f'Job {i+1}')
-            plt.title('Best Fitness Over Generations for Each Parallel Run')
-            plt.xlabel('Generations')
-            plt.ylabel('Best Fitness')
-            if n_jobs <= 16:  # Only show legend if there are a reasonable number of jobs
-                plt.legend()
-            plt.show()
+        need_tracking = (("tracking" in kwargs and kwargs["tracking"]) or
+                         ("returnTracking" in kwargs and kwargs["returnTracking"]))
+        if need_tracking:
+            runs, trackings = zip(*runs)
+            if "tracking" in kwargs and kwargs["tracking"]:
+                # plot tracking for each job
+                plt.figure(figsize=(12, 6))
+                for i, track in enumerate(trackings):
+                    plt.plot(track, label=f'Job {i+1}')
+                plt.title('Best Fitness Over Generations for Each Parallel Run')
+                plt.xlabel('Generations')
+                plt.ylabel('Best Fitness')
+                if n_jobs <= 16:  # Only show legend if there are a reasonable number of jobs
+                    plt.legend()
+                plt.show()
+        flat = [model for sublist in runs for model in sublist]
+        if "returnTracking" in kwargs and kwargs["returnTracking"]:
+            # Combine per-job tracking into a single series (element-wise minimum)
+            non_empty = [list(t) for t in trackings if len(t) > 0]
+            if non_empty:
+                max_len = max(len(t) for t in non_empty)
+                combined = [min(t[i] for t in non_empty if i < len(t)) for i in range(max_len)]
+            else:
+                combined = []
+            return sortModels(flat), combined
     flat = [model for sublist in runs for model in sublist]
     return sortModels(flat)
 
