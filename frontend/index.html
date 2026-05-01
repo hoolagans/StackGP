@@ -1301,11 +1301,18 @@ async function reloadHistoryJob(jobId) {
     document.getElementById("exportCsvBtn").disabled = false;
   }
 
+  // Ensure the Model Explorer "current job" source points at the reloaded job
+  const explorerSrc = document.getElementById("explorerModelSource");
+  if (explorerSrc) explorerSrc.value = "current";
+
   setStatus("Complete", "success");
   document.getElementById("trackingStatus").textContent =
     `Complete — ${job.tracking ? job.tracking.length : 0} generations (reloaded)`;
 
   showToast("Results reloaded from history.", "info");
+
+  // Scroll to the Results section so the user can see the populated table
+  document.getElementById("modelsBody").closest(".section-card").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 // ── Settings presets (localStorage)
