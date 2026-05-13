@@ -14,6 +14,7 @@ import random
 import numpy as np
 import sys
 import os
+import warnings
 
 # Ensure the StackGP directory is on the path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -919,10 +920,18 @@ class TestEvolve(unittest.TestCase):
         self.assertGreater(len(models), 0)
 
     def test_evolve_gpu_flag(self):
-        models = sgp.evolve(self.x, self.y, generations=2, popSize=15,
-                            ops=sgp.defaultOps(), align=False, gpu=True)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            models = sgp.evolve(self.x, self.y, generations=2, popSize=15,
+                                ops=sgp.defaultOps(), align=False, gpu=True)
         self.assertIsInstance(models, list)
         self.assertGreater(len(models), 0)
+        has_cuda = getattr(sgp, "torch", None) is not None and sgp.torch.cuda.is_available()
+        warned_fallback = any("falling back to CPU" in str(w.message) for w in caught)
+        if has_cuda:
+            self.assertFalse(warned_fallback)
+        else:
+            self.assertTrue(warned_fallback)
 
 
 # ---------------------------------------------------------------------------
