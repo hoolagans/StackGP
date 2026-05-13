@@ -29,6 +29,11 @@ except:
 import signal #for timing out functions
 from contextlib import contextmanager #for timing out functions
 
+try:
+    import torch
+except Exception:
+    torch = None
+
 warnings.filterwarnings('ignore', '.*invalid value.*' )
 warnings.filterwarnings('ignore', '.*overflow.*' )
 warnings.filterwarnings('ignore', '.*divide by.*' )
@@ -104,6 +109,220 @@ def xnor1(a,b):
     return np.logical_not(np.logical_xor(a,b))
 def not1(a):
     return np.logical_not(a)
+
+
+def _torch_like_arg(value, device, dtype):
+    if torch is None:
+        return value
+    if torch.is_tensor(value):
+        return value.to(device=device, dtype=dtype)
+    return torch.as_tensor(value, device=device, dtype=dtype)
+
+
+def _torch_unary_float_op(a, op):
+    device = a.device if torch.is_tensor(a) else torch.device("cuda")
+    dtype = a.dtype if torch.is_tensor(a) else torch.float64
+    ta = _torch_like_arg(a, device, dtype)
+    return op(ta)
+
+
+def _torch_binary_float_op(a, b, op):
+    if torch.is_tensor(a):
+        device, dtype = a.device, a.dtype
+    elif torch.is_tensor(b):
+        device, dtype = b.device, b.dtype
+    else:
+        device, dtype = torch.device("cuda"), torch.float64
+    ta = _torch_like_arg(a, device, dtype)
+    tb = _torch_like_arg(b, device, dtype)
+    return op(ta, tb)
+
+
+def _torch_protect_div(a, b):
+    return _torch_binary_float_op(a, b, lambda ta, tb: ta / torch.where(tb == 0, torch.full_like(tb, torch.nan), tb))
+
+
+def _torch_power(a, b):
+    return _torch_binary_float_op(a, b, lambda ta, tb: ta ** tb)
+
+
+def _torch_inv(a):
+    return _torch_unary_float_op(a, lambda ta: ta ** (-1))
+
+
+def _torch_and(a, b):
+    return _torch_binary_float_op(a, b, torch.logical_and)
+
+
+def _torch_or(a, b):
+    return _torch_binary_float_op(a, b, torch.logical_or)
+
+
+def _torch_xor(a, b):
+    return _torch_binary_float_op(a, b, torch.logical_xor)
+
+
+def _torch_nand(a, b):
+    return _torch_unary_float_op(_torch_and(a, b), torch.logical_not)
+
+
+def _torch_nor(a, b):
+    return _torch_unary_float_op(_torch_or(a, b), torch.logical_not)
+
+
+def _torch_xnor(a, b):
+    return _torch_unary_float_op(_torch_xor(a, b), torch.logical_not)
+
+
+def _torch_not(a):
+    return _torch_unary_float_op(a, torch.logical_not)
+
+
+_TORCH_OPS = {}
+_torch_fitness_kernel = None
+if torch is not None:
+    _TORCH_OPS = {
+        protectDiv: _torch_protect_div,
+        add: lambda a, b: _torch_binary_float_op(a, b, torch.add),
+        sub: lambda a, b: _torch_binary_float_op(a, b, torch.sub),
+        mult: lambda a, b: _torch_binary_float_op(a, b, torch.mul),
+        exp: lambda a: _torch_unary_float_op(a, torch.exp),
+        power: _torch_power,
+        sqrt: lambda a: _torch_unary_float_op(a, torch.sqrt),
+        sqrd: lambda a: _torch_unary_float_op(a, lambda ta: ta ** 2),
+        inv: _torch_inv,
+        neg: lambda a: _torch_unary_float_op(a, torch.neg),
+        sin: lambda a: _torch_unary_float_op(a, torch.sin),
+        cos: lambda a: _torch_unary_float_op(a, torch.cos),
+        tan: lambda a: _torch_unary_float_op(a, torch.tan),
+        arccos: lambda a: _torch_unary_float_op(a, torch.arccos),
+        arcsin: lambda a: _torch_unary_float_op(a, torch.arcsin),
+        arctan: lambda a: _torch_unary_float_op(a, torch.arctan),
+        tanh: lambda a: _torch_unary_float_op(a, torch.tanh),
+        log: lambda a: _torch_unary_float_op(a, torch.log),
+        log10: lambda a: _torch_unary_float_op(a, torch.log10),
+        log2: lambda a: _torch_unary_float_op(a, torch.log2),
+        abs1: lambda a: _torch_unary_float_op(a, torch.abs),
+        and1: _torch_and,
+        or1: _torch_or,
+        xor1: _torch_xor,
+        nand1: _torch_nand,
+        nor1: _torch_nor,
+        xnor1: _torch_xnor,
+        not1: _torch_not,
+    }
+    try:
+        @torch.jit.script
+        def _torch_fitness_kernel(predicted, response):
+            pred_centered = predicted - torch.mean(predicted)
+            resp_centered = response - torch.mean(response)
+            denom = torch.sqrt(torch.sum(pred_centered * pred_centered) * torch.sum(resp_centered * resp_centered))
+            if denom <= 0:
+                return torch.tensor(float("nan"), device=predicted.device, dtype=predicted.dtype)
+            corr = torch.sum(pred_centered * resp_centered) / denom
+            return 1.0 - corr * corr
+    except Exception:
+        _torch_fitness_kernel = None
+
+
+def _apply_torch_op(op, args):
+    if torch is None:
+        return None
+    if op not in _TORCH_OPS:
+        return None
+    try:
+        return _TORCH_OPS[op](*args)
+    except Exception:
+        return None
+
+
+def evaluateGPModelTorch(model, inputData, device="cuda"):
+    if torch is None:
+        return None
+    data = torch.as_tensor(np.array(inputData).astype(float), device=device, dtype=torch.float64)
+    var_list = list(model[1])
+    op_list = list(model[0])
+    stack3 = []
+
+    if len(op_list) == 0:
+        return None
+
+    var_idx = 0
+    for op in op_list:
+        if callable(op):
+            patt = getArity(op)
+            while patt > len(stack3):
+                if var_idx >= len(var_list):
+                    return None
+                stack3.append(var_list[var_idx])
+                var_idx += 1
+            args = [i(data) if callable(i) else i for i in stack3[-patt:]]
+            del stack3[-patt:]
+            temp = _apply_torch_op(op, args)
+            if temp is None:
+                return None
+            stack3.append(temp)
+        else:
+            if var_idx < len(var_list):
+                value = var_list[var_idx]
+                stack3.append(value(data) if callable(value) else value)
+                var_idx += 1
+
+    result_stack = list(reversed(stack3))
+    if len(result_stack) == 0:
+        return None
+    response = result_stack[0]
+    if not torch.is_tensor(response):
+        response = torch.tensor(response, device=device, dtype=torch.float64)
+    if response.ndim == 0 and inputLen(inputData) > 1:
+        response = response.repeat(inputLen(inputData))
+    return response
+
+
+def fitnessTorch(prog, data, response, device="cuda"):
+    if torch is None:
+        return fitness(prog, data, response)
+    predicted = evaluateGPModelTorch(prog, data, device=device)
+    if predicted is None:
+        return fitness(prog, data, response)
+    if predicted.ndim == 0 and inputLen(data) > 1:
+        predicted = predicted.repeat(inputLen(data))
+    if (not torch.isfinite(predicted).all()) or torch.all(predicted == predicted[0]):
+        return np.nan
+    response_t = torch.as_tensor(response, device=device, dtype=predicted.dtype)
+    fit = None
+    if _torch_fitness_kernel is not None:
+        fit = _torch_fitness_kernel(predicted, response_t)
+    else:
+        pred_centered = predicted - torch.mean(predicted)
+        resp_centered = response_t - torch.mean(response_t)
+        denom = torch.sqrt(torch.sum(pred_centered * pred_centered) * torch.sum(resp_centered * resp_centered))
+        fit = torch.nan if denom <= 0 else 1.0 - (torch.sum(pred_centered * resp_centered) / denom) ** 2
+    fit_val = float(fit.detach().cpu().item())
+    if math.isnan(fit_val):
+        return 1
+    return fit_val
+
+
+def rmseTorch(model, inputData, response, device="cuda"):
+    if torch is None:
+        return rmse(model, inputData, response)
+    predictions = evaluateGPModelTorch(model, inputData, device=device)
+    if predictions is None:
+        return rmse(model, inputData, response)
+    if (not torch.isfinite(predictions).all()) or torch.is_complex(predictions):
+        return np.nan
+    response_t = torch.as_tensor(response, device=device, dtype=predictions.dtype)
+    error = torch.sqrt(torch.mean((predictions - response_t) ** 2))
+    return float(error.detach().cpu().item())
+
+
+def _gpu_metric(metric, model, inputData, response, device):
+    if metric == fitness:
+        return fitnessTorch(model, inputData, response, device=device)
+    if metric == rmse:
+        return rmseTorch(model, inputData, response, device=device)
+    return metric(model, inputData, response)
 
 
 def defaultOps():
@@ -784,7 +1003,7 @@ def optimizeModel(model, inputData, responseData, bounds=None, **kwargs):
     return newModel
 
 
-def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=defaultConst(), variableNames=[], mutationRate=79, crossoverRate=11, spawnRate=10, extinction=False,extinctionRate=10,elitismRate=10,popSize=300,maxComplexity=100,align=True,initialPop=[],timeLimit=300,capTime=False,tourneySize=5,tracking=False,returnTracking=False,liveTracking=False,liveTrackingInterval=1,modelEvaluationMetrics=[fitness,stackGPModelComplexity],dataSubsample=False,samplingMethod=randomSubsample,alternateObjectives=[],alternateObjFrequency=10,allowEarlyTermination=False,earlyTerminationThreshold=0):
+def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=defaultConst(), variableNames=[], mutationRate=79, crossoverRate=11, spawnRate=10, extinction=False,extinctionRate=10,elitismRate=10,popSize=300,maxComplexity=100,align=True,initialPop=[],timeLimit=300,capTime=False,tourneySize=5,tracking=False,returnTracking=False,liveTracking=False,liveTrackingInterval=1,modelEvaluationMetrics=[fitness,stackGPModelComplexity],dataSubsample=False,samplingMethod=randomSubsample,alternateObjectives=[],alternateObjFrequency=10,allowEarlyTermination=False,earlyTerminationThreshold=0,gpu=False):
     
     alternatingFlag = False
     if callable(modelEvaluationMetrics):
@@ -804,6 +1023,10 @@ def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=def
     fullInput,fullResponse=copy.deepcopy(inputData),copy.deepcopy(responseData)
     inData=copy.deepcopy(fullInput)
     resData=copy.deepcopy(fullResponse)
+    use_gpu = bool(gpu and torch is not None and torch.cuda.is_available())
+    gpu_device = "cuda"
+    if gpu and not use_gpu:
+        warnings.warn("GPU acceleration requested but CUDA-enabled PyTorch is not available; falling back to CPU.")
     variableCount=varCount(inData)
     models=initializeGPModels(variableCount,ops,const,popSize)
     models=models+initialPop
@@ -824,8 +1047,11 @@ def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=def
                 metrics=modelEvaluationMetrics
         if dataSubsample:
             inData,resData=samplingMethod(fullInput,fullResponse,generations=generations,generation=i)
+        eval_metrics = metrics
+        if use_gpu:
+            eval_metrics = [lambda model, d, r, metric=metric: _gpu_metric(metric, model, d, r, gpu_device) for metric in metrics]
         for mods in models:
-            setModelQuality(mods,inData,resData,modelEvaluationMetrics=metrics)
+            setModelQuality(mods,inData,resData,modelEvaluationMetrics=eval_metrics)
         models=removeIndeterminateModels(models)
         if allowEarlyTermination and min([mods[2][0] for mods in models])<=earlyTerminationThreshold:
             print("Early termination at generation ", i)
@@ -848,8 +1074,11 @@ def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=def
         paretoModels=selectModels(models,elitismRate/100*popSize if elitismRate/100*popSize<len(models) else len(models))
         if extinction and i%extinctionRate==0 and i>0:
             models=initializeGPModels(variableCount,ops,const,popSize)
+            extinction_metrics = metrics
+            if use_gpu:
+                extinction_metrics = [lambda model, d, r, metric=metric: _gpu_metric(metric, model, d, r, gpu_device) for metric in metrics]
             for mods in models:
-                setModelQuality(mods,inData,resData,modelEvaluationMetrics=metrics)
+                setModelQuality(mods,inData,resData,modelEvaluationMetrics=extinction_metrics)
         
         models=tournamentModelSelection(models,popSize,tourneySize)
         
@@ -879,16 +1108,22 @@ def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=def
         models=copy.deepcopy(childModels)
         
     
+    final_metrics = allMetrics
+    if use_gpu:
+        final_metrics = [lambda model, d, r, metric=metric: _gpu_metric(metric, model, d, r, gpu_device) for metric in allMetrics]
     for mods in models:
-        setModelQuality(mods,fullInput,fullResponse,modelEvaluationMetrics=allMetrics)
+        setModelQuality(mods,fullInput,fullResponse,modelEvaluationMetrics=final_metrics)
     models=[trimModel(mod) for mod in models]
     models=deleteDuplicateModels(models)
     models=removeIndeterminateModels(models)
     models=sortModels(models)
     if align:
         models=[alignGPModel(mods,fullInput,fullResponse) for mods in models]
+        align_metrics = allMetrics
+        if use_gpu:
+            align_metrics = [lambda model, d, r, metric=metric: _gpu_metric(metric, model, d, r, gpu_device) for metric in allMetrics]
         for mods in models:
-            setModelQuality(mods,fullInput,fullResponse,modelEvaluationMetrics=allMetrics)
+            setModelQuality(mods,fullInput,fullResponse,modelEvaluationMetrics=align_metrics)
     
     if tracking or returnTracking:
         bestFits.append(min([mods[2][0] for mods in paretoTournament(models)]))

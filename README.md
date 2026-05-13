@@ -8,6 +8,8 @@ Demo.ipynp contains a simple demo that uses the system to train models on a samp
 
 StackGPVis.ipynb contains some plotting features in development. 
 
+`evolve(...)` supports optional GPU-accelerated search via PyTorch CUDA kernels by setting `gpu=True` (disabled by default).
+
 ## Publications using StackGP: 
 
 1. Active Learning Improves Performance on Symbolic Regression Tasks in StackGP https://dl.acm.org/doi/10.1145/3520304.3528941 

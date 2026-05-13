@@ -918,6 +918,12 @@ class TestEvolve(unittest.TestCase):
                             initialPop=initial)
         self.assertGreater(len(models), 0)
 
+    def test_evolve_gpu_flag(self):
+        models = sgp.evolve(self.x, self.y, generations=2, popSize=15,
+                            ops=sgp.defaultOps(), align=False, gpu=True)
+        self.assertIsInstance(models, list)
+        self.assertGreater(len(models), 0)
+
 
 # ---------------------------------------------------------------------------
 # 17. Benchmark Generation
