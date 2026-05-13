@@ -227,6 +227,7 @@ if torch is not None:
             corr = torch.sum(pred_centered * resp_centered) / safe_denom
             return 1.0 - corr * corr
     except (RuntimeError, TypeError, ValueError, AttributeError):
+        # If TorchScript compilation is unavailable for this runtime, use eager-mode fallback.
         _torch_fitness_kernel = None
 
 
@@ -255,14 +256,14 @@ def evaluateGPModelTorch(model, inputData, device="cuda"):
     var_idx = 0
     for op in op_list:
         if callable(op):
-            patt = getArity(op)
-            while patt > len(evaluation_stack):
+            arity = getArity(op)
+            while arity > len(evaluation_stack):
                 if var_idx >= len(var_list):
                     return None
                 evaluation_stack.append(var_list[var_idx])
                 var_idx += 1
-            args = [operand(data) if callable(operand) else operand for operand in evaluation_stack[-patt:]]
-            del evaluation_stack[-patt:]
+            args = [operand(data) if callable(operand) else operand for operand in evaluation_stack[-arity:]]
+            del evaluation_stack[-arity:]
             temp = _apply_torch_op(op, args)
             if temp is None:
                 return None
@@ -1047,7 +1048,7 @@ def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=def
     inData=copy.deepcopy(fullInput)
     resData=copy.deepcopy(fullResponse)
     use_gpu = bool(gpu and torch is not None and torch.cuda.is_available())
-    gpu_device = "cuda" if use_gpu else None
+    gpu_device = "cuda" if use_gpu else "cpu"
     if gpu and not use_gpu:
         warnings.warn("GPU acceleration requested but CUDA-enabled PyTorch is not available; falling back to CPU.")
     variableCount=varCount(inData)

@@ -926,7 +926,11 @@ class TestEvolve(unittest.TestCase):
                                 ops=sgp.defaultOps(), align=False, gpu=True)
         self.assertIsInstance(models, list)
         self.assertGreater(len(models), 0)
-        has_cuda = getattr(sgp, "torch", None) is not None and sgp.torch.cuda.is_available()
+        try:
+            import torch
+            has_cuda = torch.cuda.is_available()
+        except ImportError:
+            has_cuda = False
         warned_fallback = any("falling back to CPU" in str(w.message) for w in caught)
         if has_cuda:
             self.assertFalse(warned_fallback)
