@@ -1,8 +1,8 @@
 import React, { useCallback, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Upload, ChevronRight, X, Check } from 'lucide-react';
+import { Upload, ChevronRight, Check } from 'lucide-react';
 import { uploadFile, configureColumns, DataTable as DT } from '../api/client';
-import { Card, Button, Select, Badge, EmptyState } from '../components/ui';
+import { Card, Button, Badge, EmptyState } from '../components/ui';
 import DataTable from '../components/DataTable';
 import toast from 'react-hot-toast';
 
@@ -25,8 +25,9 @@ const ImportPage: React.FC = () => {
       setFeatureCols([]);
       setTargetCol('');
       toast.success(`Loaded ${res.data.total_rows} rows × ${res.data.columns.length} columns`);
-    } catch (e: any) {
-      toast.error(e.response?.data?.detail ?? 'Upload failed');
+    } catch (e) {
+      const detail = (e as { response?: { data?: { detail?: string } } }).response?.data?.detail;
+      toast.error(detail ?? 'Upload failed');
     } finally {
       setLoading(false);
     }
@@ -71,8 +72,9 @@ const ImportPage: React.FC = () => {
       await configureColumns({ target_col: targetCol, feature_cols: featureCols });
       setConfigured(true);
       toast.success('Columns configured');
-    } catch (e: any) {
-      toast.error(e.response?.data?.detail ?? 'Failed');
+    } catch (e) {
+      const detail = (e as { response?: { data?: { detail?: string } } }).response?.data?.detail;
+      toast.error(detail ?? 'Failed');
     }
   };
 

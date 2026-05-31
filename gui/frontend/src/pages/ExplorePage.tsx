@@ -2,12 +2,12 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  BarChart, Bar, Cell, LineChart, Line,
+  BarChart, Bar, Cell,
 } from 'recharts';
 import {
   getStats, getCorrelation, getColumnData, getScatter, getSessionState,
 } from '../api/client';
-import { Card, Button, Select, StatBadge, Spinner, EmptyState } from '../components/ui';
+import { Card, Button, Spinner, EmptyState } from '../components/ui';
 import toast from 'react-hot-toast';
 
 // ---------- Correlation Heatmap ----------
@@ -90,22 +90,25 @@ const ExplorePage: React.FC = () => {
   const [hasData, setHasData] = useState(false);
   const [allCols, setAllCols] = useState<string[]>([]);
   const [targetCol, setTargetCol] = useState('');
-  const [featureCols, setFeatureCols] = useState<string[]>([]);
 
-  const [stats, setStats] = useState<Record<string, any> | null>(null);
+  type StatsData = Awaited<ReturnType<typeof getStats>>['data'];
+  type ColData = Awaited<ReturnType<typeof getColumnData>>['data'];
+
+  const [stats, setStats] = useState<StatsData | null>(null);
   const [corr, setCorr] = useState<{ columns: string[]; matrix: (number | null)[][] } | null>(null);
   const [selectedCol, setSelectedCol] = useState('');
-  const [colData, setColData] = useState<{ values: number[]; histogram: any } | null>(null);
+  const [colData, setColData] = useState<ColData | null>(null);
   const [scatterX, setScatterX] = useState('');
   const [scatterY, setScatterY] = useState('');
   const [scatterData, setScatterData] = useState<{ x: number[]; y: number[] } | null>(null);
-  const [loading, setLoading] = useState(false);
+
+  // Derive loading state: we are loading when data exists but stats haven't arrived yet.
+  const loading = hasData && stats === null;
 
   useEffect(() => {
     getSessionState().then(r => {
       setHasData(r.data.has_processed_data);
       setTargetCol(r.data.target_col ?? '');
-      setFeatureCols(r.data.feature_cols);
       const cols = [...r.data.feature_cols, r.data.target_col].filter(Boolean) as string[];
       setAllCols(cols);
       if (cols.length > 0) setSelectedCol(cols[0]);
@@ -115,14 +118,15 @@ const ExplorePage: React.FC = () => {
 
   useEffect(() => {
     if (!hasData) return;
-    setLoading(true);
     Promise.all([getStats(), getCorrelation()])
       .then(([s, c]) => {
         setStats(s.data);
         setCorr(c.data);
       })
-      .catch(() => toast.error('Failed to load stats'))
-      .finally(() => setLoading(false));
+      .catch(() => {
+        toast.error('Failed to load stats');
+        setStats({});  // stop spinner on error
+      });
   }, [hasData]);
 
   useEffect(() => {
@@ -186,7 +190,7 @@ const ExplorePage: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {Object.entries(stats).map(([col, s]: [string, any], i) => (
+                {Object.entries(stats).map(([col, s], i) => (
                   <tr
                     key={col}
                     onClick={() => setSelectedCol(col)}

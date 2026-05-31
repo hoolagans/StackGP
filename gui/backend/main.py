@@ -581,10 +581,14 @@ def get_variable_importance(max_models: int = 20):
     var_usage: Dict[str, int] = {f: 0 for f in features}
     for m in models[:max_models]:
         try:
-            usage = sgp.stackVarUsage(m[0])
-            for i, count in enumerate(usage):
-                if i < len(features):
-                    var_usage[features[i]] += count
+            # m[1] is the var stack: a list of variableSelect(i) lambdas and float constants.
+            # variableSelect(i) creates `lambda variables: variables[i]`, so the captured
+            # index is in __closure__[0].cell_contents.
+            for v in m[1]:
+                if callable(v) and getattr(v, '__closure__', None):
+                    idx = v.__closure__[0].cell_contents
+                    if isinstance(idx, int) and 0 <= idx < len(features):
+                        var_usage[features[idx]] += 1
         except Exception:
             pass
 
@@ -777,3 +781,16 @@ def reset_session():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000, reload=False)
+
+# Serve the React SPA in production (must be defined after all API routes so
+# the catch-all does not shadow them).
+_static_dir = Path(__file__).parent / "static"
+if _static_dir.is_dir():
+    from fastapi.responses import FileResponse as _FileResponse
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_spa(full_path: str):
+        candidate = _static_dir / full_path
+        if candidate.is_file():
+            return _FileResponse(str(candidate))
+        return _FileResponse(str(_static_dir / "index.html"))

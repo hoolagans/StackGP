@@ -2,13 +2,12 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  ScatterChart, Scatter, ReferenceLine,
 } from 'recharts';
 import {
   getSessionState, getModels, getEnsemble, predictModel, predictEnsemble,
   findMaxUncertaintyPoint, ModelInfo,
 } from '../api/client';
-import { Card, Button, StatBadge, Badge, Spinner, EmptyState, Input } from '../components/ui';
+import { Card, Button, Badge, Spinner, EmptyState, Input } from '../components/ui';
 import toast from 'react-hot-toast';
 
 const PredictPage: React.FC = () => {
@@ -59,8 +58,9 @@ const PredictPage: React.FC = () => {
         const r = await predictModel(selectedModelId, [row]);
         setPredictions([{ value: r.data.predictions[0] }]);
       }
-    } catch (e: any) {
-      toast.error(e.response?.data?.detail ?? 'Prediction failed');
+    } catch (e) {
+      const detail = (e as { response?: { data?: { detail?: string } } }).response?.data?.detail;
+      toast.error(detail ?? 'Prediction failed');
     } finally {
       setPredicting(false);
     }
@@ -84,8 +84,9 @@ const PredictPage: React.FC = () => {
         setBatchResults({ pred: r.data.predictions, unc: r.data.predictions.map(() => null) });
       }
       toast.success(`Predicted ${rows.length} rows`);
-    } catch (e: any) {
-      toast.error(e.response?.data?.detail ?? 'Batch prediction failed');
+    } catch (e) {
+      const detail = (e as { response?: { data?: { detail?: string } } }).response?.data?.detail;
+      toast.error(detail ?? 'Batch prediction failed');
     } finally {
       setPredicting(false);
     }
@@ -100,8 +101,9 @@ const PredictPage: React.FC = () => {
       featureCols.forEach((f, i) => { newInputs[f] = r.data.point[i]?.toFixed(4) ?? ''; });
       setInputs(newInputs);
       toast.success('Maximum uncertainty point found — inputs populated');
-    } catch (e: any) {
-      toast.error(e.response?.data?.detail ?? 'Failed');
+    } catch (e) {
+      const detail = (e as { response?: { data?: { detail?: string } } }).response?.data?.detail;
+      toast.error(detail ?? 'Failed');
     }
   };
 
@@ -116,7 +118,9 @@ const PredictPage: React.FC = () => {
     const a = document.createElement('a');
     a.href = url;
     a.download = 'stackgp_predictions.csv';
+    document.body.appendChild(a);
     a.click();
+    document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
 

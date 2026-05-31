@@ -73,8 +73,9 @@ const ModelPage: React.FC = () => {
       setProgress(0);
       startPolling();
       toast('Training started…');
-    } catch (e: any) {
-      toast.error(e.response?.data?.detail ?? 'Failed to start');
+    } catch (e) {
+      const detail = (e as { response?: { data?: { detail?: string } } }).response?.data?.detail;
+      toast.error(detail ?? 'Failed to start');
     }
   };
 
@@ -94,7 +95,7 @@ const ModelPage: React.FC = () => {
     complexity: l.complexity,
   }));
 
-  const updateCfg = (k: keyof TrainConfig, v: any) => setCfg(c => ({ ...c, [k]: v }));
+  const updateCfg = <K extends keyof TrainConfig>(k: K, v: TrainConfig[K]) => setCfg(c => ({ ...c, [k]: v }));
 
   const INTEGER_KEYS: (keyof TrainConfig)[] = [
     'generations', 'pop_size', 'max_complexity', 'max_length',
@@ -155,7 +156,7 @@ const ModelPage: React.FC = () => {
               <Select
                 label="Operator set"
                 value={cfg.ops_set}
-                onChange={e => updateCfg('ops_set', e.target.value)}
+                onChange={e => updateCfg('ops_set', e.target.value as TrainConfig['ops_set'])}
               >
                 <option value="default">Default (arithmetic)</option>
                 <option value="all">All (incl. trig/log)</option>
@@ -301,7 +302,7 @@ const ModelPage: React.FC = () => {
               <YAxis yAxisId="cplx" orientation="right" tick={{ fontSize: 10 }} label={{ value: 'Complexity', angle: 90, position: 'insideRight', fontSize: 11 }} />
               <Tooltip />
               <Legend wrapperStyle={{ fontSize: 11 }} />
-              <Line yAxisId="fit" type="monotone" dataKey="fitness" stroke="#3b82f6" dot={false} name="Fitness (corr)" strokeWidth={2} />
+              <Line yAxisId="fit" type="monotone" dataKey="fitness" stroke="#3b82f6" dot={false} name="Fitness (1−R²)" strokeWidth={2} />
               <Line yAxisId="cplx" type="monotone" dataKey="complexity" stroke="#f59e0b" dot={false} name="Complexity" strokeWidth={1.5} strokeDasharray="4 4" />
             </LineChart>
           </ResponsiveContainer>

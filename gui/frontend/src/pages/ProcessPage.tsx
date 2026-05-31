@@ -36,8 +36,9 @@ const ProcessPage: React.FC = () => {
       const res = await processData(cfg);
       setResult(res.data);
       toast.success(`Processed: ${res.data.train_rows} train / ${res.data.test_rows} test`);
-    } catch (e: any) {
-      toast.error(e.response?.data?.detail ?? 'Processing failed');
+    } catch (e) {
+      const detail = (e as { response?: { data?: { detail?: string } } }).response?.data?.detail;
+      toast.error(detail ?? 'Processing failed');
     } finally {
       setLoading(false);
     }
@@ -68,7 +69,7 @@ const ProcessPage: React.FC = () => {
           <Select
             label="Strategy"
             value={cfg.fill_missing}
-            onChange={e => setCfg(c => ({ ...c, fill_missing: e.target.value as any }))}
+            onChange={e => setCfg(c => ({ ...c, fill_missing: e.target.value as ProcessConfig['fill_missing'] }))}
           >
             <option value="drop">Drop rows with missing values</option>
             <option value="mean">Fill with column mean</option>
@@ -84,7 +85,7 @@ const ProcessPage: React.FC = () => {
           <Select
             label="Method"
             value={cfg.normalize}
-            onChange={e => setCfg(c => ({ ...c, normalize: e.target.value as any }))}
+            onChange={e => setCfg(c => ({ ...c, normalize: e.target.value as ProcessConfig['normalize'] }))}
           >
             <option value="none">No normalization</option>
             <option value="minmax">Min-Max scaling [0, 1]</option>

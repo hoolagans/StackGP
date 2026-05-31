@@ -1,9 +1,9 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronRight } from 'lucide-react';
 import {
   ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  BarChart, Bar, Cell, LineChart, Line, ReferenceLine, Legend,
+  BarChart, Bar, Cell, ReferenceLine,
 } from 'recharts';
 import {
   getModels, getPareto, getResiduals, getVariableImportance, buildEnsemble,
@@ -14,7 +14,7 @@ import toast from 'react-hot-toast';
 
 const AnalysisPage: React.FC = () => {
   const navigate = useNavigate();
-  const [loading, setLoading] = useState(true);
+  const [fetched, setFetched] = useState(false);
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [pareto, setPareto] = useState<ParetoPoint[]>([]);
   const [importance, setImportance] = useState<Record<string, number>>({});
@@ -31,7 +31,10 @@ const AnalysisPage: React.FC = () => {
   const [buildingEnsemble, setBuildingEnsemble] = useState(false);
   const [ensembleSize, setEnsembleSize] = useState(10);
   const [ensembleBuilt, setEnsembleBuilt] = useState(false);
-  const [modelCount, setModelCount] = useState(0);
+  const [modelCount, setModelCount] = useState<number | null>(null);
+
+  // Derive loading: we are loading when modelCount is known, positive, but data isn't fetched yet.
+  const loading = modelCount !== null && modelCount > 0 && !fetched;
 
   useEffect(() => {
     getSessionState().then(r => {
@@ -41,17 +44,16 @@ const AnalysisPage: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (modelCount === 0) { setLoading(false); return; }
-    setLoading(true);
+    if (modelCount === null || modelCount === 0) return;
     Promise.all([getModels(100), getPareto(), getVariableImportance()])
       .then(([m, p, vi]) => {
         setModels(m.data.models);
         setPareto(p.data.pareto);
         setImportance(vi.data.importance);
-        if (m.data.models.length > 0) setSelectedId(0);
+        if (m.data.models.length > 0) setSelectedId(m.data.models[0].id);
       })
       .catch(() => toast.error('Failed to load models'))
-      .finally(() => setLoading(false));
+      .finally(() => setFetched(true));
   }, [modelCount]);
 
   useEffect(() => {
@@ -65,14 +67,19 @@ const AnalysisPage: React.FC = () => {
       const r = await buildEnsemble(ensembleSize);
       setEnsembleBuilt(true);
       toast.success(`Ensemble built with ${r.data.ensemble_size} models`);
-    } catch (e: any) {
-      toast.error(e.response?.data?.detail ?? 'Failed');
+    } catch (e) {
+      const detail = (e as { response?: { data?: { detail?: string } } }).response?.data?.detail;
+      toast.error(detail ?? 'Failed');
     } finally {
       setBuildingEnsemble(false);
     }
   };
 
-  if (modelCount === 0 && !loading) {
+  if (modelCount === null || loading) {
+    return <div className="flex justify-center items-center h-64"><Spinner /></div>;
+  }
+
+  if (modelCount === 0) {
     return (
       <div className="p-6">
         <EmptyState icon="📊" title="No models yet" subtitle="Train models first on the Model page" />
@@ -81,10 +88,6 @@ const AnalysisPage: React.FC = () => {
         </div>
       </div>
     );
-  }
-
-  if (loading) {
-    return <div className="flex justify-center items-center h-64"><Spinner /></div>;
   }
 
   const selectedModel = models.find(m => m.id === selectedId);
@@ -98,11 +101,11 @@ const AnalysisPage: React.FC = () => {
 
   // Residual chart
   const residualChart = residuals
-    ? residuals.actual.slice(0, 500).map((a: number | null, i: number) => ({
+    ? residuals.actual.slice(0, 500).map((a, i) => ({
         actual: a,
         predicted: residuals.predicted[i],
         residual: residuals.residuals[i],
-      })).filter((d: any) => d.actual != null && d.predicted != null)
+      })).filter(d => d.actual != null && d.predicted != null)
     : [];
 
   // Variable importance chart
@@ -134,7 +137,7 @@ const AnalysisPage: React.FC = () => {
             <XAxis dataKey="complexity" name="Complexity" tick={{ fontSize: 10 }}
               label={{ value: 'Complexity', position: 'insideBottom', offset: -3, fontSize: 11 }} />
             <YAxis dataKey="fitness" name="Fitness" domain={[0, 1]} tick={{ fontSize: 10 }}
-              label={{ value: 'Fitness (corr)', angle: -90, position: 'insideLeft', fontSize: 11 }} />
+              label={{ value: 'Fitness (1−R²)', angle: -90, position: 'insideLeft', fontSize: 11 }} />
             <Tooltip content={({ active, payload }) => {
               if (!active || !payload?.length) return null;
               const d = payload[0].payload;
@@ -152,7 +155,7 @@ const AnalysisPage: React.FC = () => {
               data={paretoChart.map(d => ({ ...d, selected: d.id === selectedId }))}
               fill="#3b82f6"
               opacity={0.7}
-              onClick={(d: any) => setSelectedId(d.id)}
+              onClick={(d) => setSelectedId((d as unknown as { id: number }).id)}
               cursor="pointer"
             />
           </ScatterChart>
@@ -184,7 +187,7 @@ const AnalysisPage: React.FC = () => {
                     {m.expression}
                   </td>
                   <td className="px-3 py-1.5 text-right">
-                    <span className={`font-semibold ${(m.fitness ?? 0) > 0.9 ? 'text-green-600' : (m.fitness ?? 0) > 0.7 ? 'text-yellow-600' : 'text-red-500'}`}>
+                    <span className={`font-semibold ${(m.fitness ?? 1) < 0.1 ? 'text-green-600' : (m.fitness ?? 1) < 0.3 ? 'text-yellow-600' : 'text-red-500'}`}>
                       {m.fitness?.toFixed(4) ?? '—'}
                     </span>
                   </td>
