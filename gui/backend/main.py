@@ -8,8 +8,8 @@ import os
 import json
 import uuid
 import threading
-import asyncio
-from typing import Optional, List, Dict, Any
+import time
+from typing import Optional, List, Dict, Any, Literal
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -52,6 +52,7 @@ session: Dict[str, Any] = {
     "training_total": 0,
     "training_thread": None,
     "training_lock": threading.Lock(),
+    "stop_event": None,
 }
 
 
@@ -137,7 +138,7 @@ class TrainConfig(BaseModel):
     crossover_rate: int = 11
     spawn_rate: int = 10
     time_limit: int = 300
-    ops_set: str = "default"   # default | all | boolean
+    ops_set: Literal["default", "all", "boolean"] = "default"   # default | all | boolean
     align: bool = True
     data_subsample: bool = False
     allow_early_termination: bool = False
@@ -156,9 +157,13 @@ class EnsembleRequest(BaseModel):
 # Data Import
 # ---------------------------------------------------------------------------
 
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
+
 @app.post("/api/upload")
 async def upload_file(file: UploadFile = File(...)):
-    content = await file.read()
+    content = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="File too large (max 50 MB)")
     name = file.filename or ""
     try:
         if name.endswith(".csv"):
@@ -383,7 +388,10 @@ def _ops_set(name: str):
     return sgp.defaultOps()
 
 
-def _run_training(cfg: TrainConfig):
+_TRAINING_CHUNK = 10  # generations per progress/stop-check interval
+
+
+def _run_training(cfg: TrainConfig, stop_event: threading.Event):
     df = session["processed_df"]
     target = session["target_col"]
     features = session["feature_cols"]
@@ -405,56 +413,89 @@ def _run_training(cfg: TrainConfig):
     session["training_total"] = cfg.generations
     session["training_status"] = "running"
 
-    def track_cb(gen, models):
-        session["training_progress"] = gen
-        if models:
-            best = models[0]
-            try:
-                fit = float(best[2][0]) if best[2] else None
-                cplx = int(best[2][1]) if len(best[2]) > 1 else None
-            except Exception:
-                fit, cplx = None, None
-            log.append({"gen": gen, "fitness": fit, "complexity": cplx})
+    current_models: list = []
+    gens_done = 0
+    start_time = time.perf_counter()
 
-    try:
-        models = sgp.evolve(
-            x, y,
-            generations=cfg.generations,
-            ops=ops,
-            variableNames=var_names,
-            mutationRate=cfg.mutation_rate,
-            crossoverRate=cfg.crossover_rate,
-            spawnRate=cfg.spawn_rate,
-            popSize=cfg.pop_size,
-            maxComplexity=cfg.max_complexity,
-            maxLength=cfg.max_length,
-            align=cfg.align,
-            timeLimit=cfg.time_limit,
-            dataSubsample=cfg.data_subsample,
-            allowEarlyTermination=cfg.allow_early_termination,
-            earlyTerminationThreshold=cfg.early_termination_threshold,
-            tracking=True,
-            liveTracking=False,
-        )
-        session["models"] = models
+    while gens_done < cfg.generations and not stop_event.is_set():
+        chunk = min(_TRAINING_CHUNK, cfg.generations - gens_done)
+        elapsed = time.perf_counter() - start_time
+        if elapsed >= cfg.time_limit:
+            break
+        remaining_time = cfg.time_limit - elapsed
+        is_last_chunk = (gens_done + chunk >= cfg.generations)
+
+        try:
+            result = sgp.evolve(
+                x, y,
+                generations=chunk,
+                ops=ops,
+                variableNames=var_names,
+                mutationRate=cfg.mutation_rate,
+                crossoverRate=cfg.crossover_rate,
+                spawnRate=cfg.spawn_rate,
+                popSize=cfg.pop_size,
+                maxComplexity=cfg.max_complexity,
+                align=is_last_chunk and cfg.align,
+                timeLimit=remaining_time,
+                capTime=True,
+                dataSubsample=cfg.data_subsample,
+                allowEarlyTermination=cfg.allow_early_termination,
+                earlyTerminationThreshold=cfg.early_termination_threshold,
+                initialPop=current_models,
+                returnTracking=True,
+                liveTracking=False,
+            )
+            current_models, best_fits = result
+        except Exception as e:
+            session["training_status"] = "error"
+            log.append({"error": "Training failed — check server logs"})
+            return
+
+        gens_done += chunk
+        with session["training_lock"]:
+            session["training_progress"] = gens_done
+
+        # Populate per-generation log entries from tracking data
+        cplx = None
+        if current_models:
+            try:
+                cplx = int(sgp.stackGPModelComplexity(current_models[0]))
+            except Exception:
+                pass
+        for j, fit in enumerate(best_fits):
+            entry: Dict[str, Any] = {"gen": gens_done - chunk + j + 1}
+            try:
+                entry["fitness"] = float(fit)
+            except Exception:
+                entry["fitness"] = None
+            if cplx is not None:
+                entry["complexity"] = cplx
+            log.append(entry)
+
+    session["models"] = current_models
+    if stop_event.is_set():
+        session["training_status"] = "idle"
+    else:
         session["training_status"] = "done"
-        session["training_progress"] = cfg.generations
-    except Exception as e:
-        session["training_status"] = "error"
-        session["training_log"].append({"error": "Training failed — check server logs"})
+        with session["training_lock"]:
+            session["training_progress"] = cfg.generations
 
 
 @app.post("/api/train/start")
 def start_training(cfg: TrainConfig, background_tasks: BackgroundTasks):
-    if session["training_status"] == "running":
-        raise HTTPException(400, "Training already running")
-    session["models"] = []
-    session["ensemble"] = []
-    session["training_log"] = []
-    session["training_status"] = "starting"
-    session["training_progress"] = 0
+    with session["training_lock"]:
+        if session["training_status"] == "running":
+            raise HTTPException(400, "Training already running")
+        session["models"] = []
+        session["ensemble"] = []
+        session["training_log"] = []
+        session["training_status"] = "starting"
+        session["training_progress"] = 0
 
-    t = threading.Thread(target=_run_training, args=(cfg,), daemon=True)
+    stop_event = threading.Event()
+    session["stop_event"] = stop_event
+    t = threading.Thread(target=_run_training, args=(cfg, stop_event), daemon=True)
     session["training_thread"] = t
     t.start()
     return {"ok": True, "status": "started"}
@@ -473,7 +514,9 @@ def get_training_status():
 
 @app.post("/api/train/stop")
 def stop_training():
-    # There's no clean interrupt, but we set status; thread will finish current generation
+    stop_event: Optional[threading.Event] = session.get("stop_event")
+    if stop_event is not None:
+        stop_event.set()
     session["training_status"] = "idle"
     return {"ok": True}
 
@@ -503,21 +546,6 @@ def list_models(max_models: int = 50):
     return {"models": result}
 
 
-@app.get("/api/models/{model_id}")
-def get_model(model_id: int):
-    models = session["models"]
-    if model_id >= len(models):
-        raise HTTPException(404, "Model not found")
-
-    df = session["processed_df"]
-    target = session["target_col"]
-    features = session["feature_cols"]
-    var_syms = [sgp.symbols(n) for n in features]
-    x, y = get_xy(df, target, features)
-
-    return model_to_dict(models[model_id], model_id, x, y, var_syms)
-
-
 @app.get("/api/models/pareto")
 def get_pareto():
     models = session["models"]
@@ -541,6 +569,42 @@ def get_pareto():
             pass
 
     return {"pareto": result}
+
+
+@app.get("/api/models/variable_importance")
+def get_variable_importance(max_models: int = 20):
+    models = session["models"]
+    features = session["feature_cols"]
+    if not models or not features:
+        return {"importance": {}}
+
+    var_usage: Dict[str, int] = {f: 0 for f in features}
+    for m in models[:max_models]:
+        try:
+            usage = sgp.stackVarUsage(m[0])
+            for i, count in enumerate(usage):
+                if i < len(features):
+                    var_usage[features[i]] += count
+        except Exception:
+            pass
+
+    total = sum(var_usage.values()) or 1
+    return {"importance": {k: v / total for k, v in var_usage.items()}}
+
+
+@app.get("/api/models/{model_id}")
+def get_model(model_id: int):
+    models = session["models"]
+    if model_id >= len(models):
+        raise HTTPException(404, "Model not found")
+
+    df = session["processed_df"]
+    target = session["target_col"]
+    features = session["feature_cols"]
+    var_syms = [sgp.symbols(n) for n in features]
+    x, y = get_xy(df, target, features)
+
+    return model_to_dict(models[model_id], model_id, x, y, var_syms)
 
 
 @app.get("/api/models/{model_id}/residuals")
@@ -578,27 +642,6 @@ def get_residuals(model_id: int):
     }
 
 
-@app.get("/api/models/variable_importance")
-def get_variable_importance(max_models: int = 20):
-    models = session["models"]
-    features = session["feature_cols"]
-    if not models or not features:
-        return {"importance": {}}
-
-    var_usage: Dict[str, int] = {f: 0 for f in features}
-    for m in models[:max_models]:
-        try:
-            usage = sgp.stackVarUsage(m[0])
-            for i, count in enumerate(usage):
-                if i < len(features):
-                    var_usage[features[i]] += count
-        except Exception:
-            pass
-
-    total = sum(var_usage.values()) or 1
-    return {"importance": {k: v / total for k, v in var_usage.items()}}
-
-
 # ---------------------------------------------------------------------------
 # Ensemble
 # ---------------------------------------------------------------------------
@@ -620,6 +663,9 @@ def build_ensemble(req: EnsembleRequest):
         return {"ok": True, "ensemble_size": len(ensemble)}
     except Exception:
         raise HTTPException(500, "Failed to build ensemble")
+
+
+@app.get("/api/ensemble")
 def get_ensemble_info():
     ensemble = session["ensemble"]
     features = session["feature_cols"]

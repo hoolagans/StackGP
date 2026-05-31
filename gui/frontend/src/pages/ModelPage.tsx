@@ -56,7 +56,7 @@ const ModelPage: React.FC = () => {
           if (r.data.status === 'done') toast.success(`Training complete — ${r.data.model_count} models found`);
           if (r.data.status === 'error') toast.error('Training error');
         }
-      } catch {}
+      } catch (e) { console.error('Polling error', e); }
     }, 1000);
   }, []);
 
@@ -95,6 +95,12 @@ const ModelPage: React.FC = () => {
   }));
 
   const updateCfg = (k: keyof TrainConfig, v: any) => setCfg(c => ({ ...c, [k]: v }));
+
+  const INTEGER_KEYS: (keyof TrainConfig)[] = [
+    'generations', 'pop_size', 'max_complexity', 'max_length',
+    'mutation_rate', 'crossover_rate', 'spawn_rate', 'time_limit',
+  ];
+
   const numericInput = (label: string, key: keyof TrainConfig, min?: number, max?: number, step?: number) => (
     <Input
       label={label}
@@ -103,7 +109,11 @@ const ModelPage: React.FC = () => {
       max={max}
       step={step ?? 1}
       value={cfg[key] as number}
-      onChange={e => updateCfg(key, parseFloat(e.target.value))}
+      onChange={e => {
+        const raw = e.target.value;
+        const parsed = INTEGER_KEYS.includes(key) ? parseInt(raw, 10) : parseFloat(raw);
+        if (!isNaN(parsed)) updateCfg(key, parsed);
+      }}
     />
   );
 

@@ -58,7 +58,7 @@ const ImportPage: React.FC = () => {
 
   const selectAllFeatures = () => {
     if (!data) return;
-    setFeatureCols(data.columns.filter(c => c !== targetCol));
+    setFeatureCols(numericCols.filter(c => c !== targetCol));
     setConfigured(false);
   };
 
@@ -145,24 +145,27 @@ const ImportPage: React.FC = () => {
                 <div className="max-h-48 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-100">
                   {data.columns.map(col => {
                     const isTarget = col === targetCol;
+                    const isNonNumeric = !numericCols.includes(col);
                     const selected = featureCols.includes(col);
+                    const disabled = isTarget || isNonNumeric;
                     return (
                       <label
                         key={col}
                         className={`flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-gray-50 select-none
-                          ${isTarget ? 'opacity-40 cursor-not-allowed' : ''}
+                          ${disabled ? 'opacity-40 cursor-not-allowed' : ''}
                           ${selected ? 'bg-brand-50' : ''}`}
                       >
                         <input
                           type="checkbox"
                           checked={selected}
-                          disabled={isTarget}
+                          disabled={disabled}
                           onChange={() => toggleFeature(col)}
                           className="rounded border-gray-300 text-brand-600"
                         />
                         <span className="text-sm text-gray-700 flex-1">{col}</span>
                         <span className="text-xs text-gray-400">{data.dtypes[col]}</span>
                         {isTarget && <Badge text="target" variant="blue" />}
+                        {!isTarget && isNonNumeric && <Badge text="non-numeric" variant="gray" />}
                       </label>
                     );
                   })}

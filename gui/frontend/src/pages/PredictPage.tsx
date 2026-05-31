@@ -41,7 +41,7 @@ const PredictPage: React.FC = () => {
         setModels(m.data.models);
         setEnsemble(e.data.ensemble);
         if (m.data.models.length > 0) setSelectedModelId(m.data.models[0].id);
-      } catch {}
+      } catch (e) { console.error('Failed to load prediction page data', e); }
       setLoading(false);
     };
     load();
@@ -112,10 +112,12 @@ const PredictPage: React.FC = () => {
       `${l},${batchResults.pred[i] ?? ''},${batchResults.unc[i] ?? ''}`
     );
     const blob = new Blob([[header, ...lines].join('\n')], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
+    a.href = url;
     a.download = 'stackgp_predictions.csv';
     a.click();
+    URL.revokeObjectURL(url);
   };
 
   if (loading) {

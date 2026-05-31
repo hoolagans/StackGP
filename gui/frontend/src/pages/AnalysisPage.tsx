@@ -19,7 +19,15 @@ const AnalysisPage: React.FC = () => {
   const [pareto, setPareto] = useState<ParetoPoint[]>([]);
   const [importance, setImportance] = useState<Record<string, number>>({});
   const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [residuals, setResiduals] = useState<any>(null);
+  const [residuals, setResiduals] = useState<{
+    actual: (number | null)[];
+    predicted: (number | null)[];
+    residuals: (number | null)[];
+    train_rmse: number;
+    test_rmse: number | null;
+    train_fitness: number;
+    test_fitness: number | null;
+  } | null>(null);
   const [buildingEnsemble, setBuildingEnsemble] = useState(false);
   const [ensembleSize, setEnsembleSize] = useState(10);
   const [ensembleBuilt, setEnsembleBuilt] = useState(false);
@@ -48,7 +56,7 @@ const AnalysisPage: React.FC = () => {
 
   useEffect(() => {
     if (selectedId == null) return;
-    getResiduals(selectedId).then(r => setResiduals(r.data)).catch(() => {});
+    getResiduals(selectedId).then(r => setResiduals(r.data)).catch(e => { console.error('Failed to load residuals', e); });
   }, [selectedId]);
 
   const handleBuildEnsemble = async () => {
@@ -130,7 +138,7 @@ const AnalysisPage: React.FC = () => {
             <Tooltip content={({ active, payload }) => {
               if (!active || !payload?.length) return null;
               const d = payload[0].payload;
-              const m = pareto[d.id];
+              const m = pareto.find(p => p.id === d.id);
               return (
                 <div className="bg-white border border-gray-200 rounded-lg shadow p-3 text-xs max-w-xs">
                   <div className="font-semibold mb-1">Model #{d.id}</div>

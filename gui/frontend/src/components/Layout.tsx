@@ -1,5 +1,5 @@
-import React from 'react';
-import { NavLink } from 'react-router-dom';
+import React, { useState } from 'react';
+import { NavLink, useNavigate } from 'react-router-dom';
 import {
   Upload, Settings, BarChart2, Brain, LineChart, Zap, RefreshCw,
 } from 'lucide-react';
@@ -15,12 +15,20 @@ const NAV = [
 ];
 
 const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const navigate = useNavigate();
+  const [confirmReset, setConfirmReset] = useState(false);
+
   const handleReset = async () => {
-    if (confirm('Reset all session data?')) {
-      await resetSession();
-      window.location.href = '/import';
+    if (!confirmReset) {
+      setConfirmReset(true);
+      return;
     }
+    setConfirmReset(false);
+    await resetSession();
+    navigate('/import');
   };
+
+  const handleCancelReset = () => setConfirmReset(false);
 
   return (
     <div className="flex h-screen bg-gray-50 overflow-hidden">
@@ -56,13 +64,33 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 
         {/* Footer */}
         <div className="px-3 py-4 border-t border-gray-700">
-          <button
-            onClick={handleReset}
-            className="flex items-center gap-2 text-gray-400 hover:text-white text-xs px-3 py-2 rounded-lg hover:bg-gray-800 w-full transition-colors"
-          >
-            <RefreshCw size={13} />
-            Reset Session
-          </button>
+          {confirmReset ? (
+            <div className="space-y-1">
+              <p className="text-xs text-yellow-400 px-3">Reset all data?</p>
+              <div className="flex gap-1">
+                <button
+                  onClick={handleReset}
+                  className="flex-1 text-xs text-red-400 hover:text-white px-3 py-1.5 rounded-lg hover:bg-red-800 transition-colors"
+                >
+                  Yes, reset
+                </button>
+                <button
+                  onClick={handleCancelReset}
+                  className="flex-1 text-xs text-gray-400 hover:text-white px-3 py-1.5 rounded-lg hover:bg-gray-800 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={handleReset}
+              className="flex items-center gap-2 text-gray-400 hover:text-white text-xs px-3 py-2 rounded-lg hover:bg-gray-800 w-full transition-colors"
+            >
+              <RefreshCw size={13} />
+              Reset Session
+            </button>
+          )}
         </div>
       </aside>
 

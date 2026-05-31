@@ -45,19 +45,15 @@ const DataTable: React.FC<Props> = ({ data, maxRows = 100, onColumnClick, highli
               {data.columns.map((col, i) => (
                 <th
                   key={col}
-                  onClick={() => handleSort(i)}
+                  onClick={() => { handleSort(i); onColumnClick?.(col); }}
                   className={`px-3 py-2.5 text-left font-semibold text-gray-600 cursor-pointer whitespace-nowrap border-b border-gray-200 hover:bg-gray-100 select-none
                     ${highlightCols.includes(col) ? 'bg-brand-50 text-brand-700' : ''}
                     ${onColumnClick ? 'hover:text-brand-600' : ''}`}
                 >
-                  <button
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); onColumnClick?.(col); }}
-                    className="text-left"
-                  >
+                  <span className="text-left">
                     {col}
                     {sortCol === i && <span className="ml-1">{sortAsc ? '↑' : '↓'}</span>}
-                  </button>
+                  </span>
                   <div className="text-gray-400 font-normal text-[10px]">{data.dtypes[col]}</div>
                 </th>
               ))}

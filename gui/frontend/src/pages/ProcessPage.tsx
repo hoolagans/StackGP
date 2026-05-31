@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronRight } from 'lucide-react';
-import { processData, getSessionState, ProcessConfig } from '../api/client';
+import { processData, getSessionState, ProcessConfig, DataTable as DataTableType } from '../api/client';
 import { Card, Button, Select, Input, StatBadge, EmptyState } from '../components/ui';
 import DataTable from '../components/DataTable';
 import toast from 'react-hot-toast';
@@ -13,7 +13,7 @@ const ProcessPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<{
     total_rows: number; train_rows: number; test_rows: number;
-    data: any;
+    data: DataTableType;
   } | null>(null);
 
   const [cfg, setCfg] = useState<ProcessConfig>({

@@ -110,7 +110,7 @@ const ExplorePage: React.FC = () => {
       setAllCols(cols);
       if (cols.length > 0) setSelectedCol(cols[0]);
       if (cols.length > 1) { setScatterX(cols[0]); setScatterY(r.data.target_col ?? cols[1]); }
-    });
+    }).catch(e => { console.error('Failed to load session state', e); });
   }, []);
 
   useEffect(() => {
