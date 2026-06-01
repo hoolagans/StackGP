@@ -45,6 +45,13 @@ def linear_model():
     return [ops, var, []]
 
 
+def lambda_unary_model():
+    """Return a model built from fresh lambda instances each time."""
+    ops = np.array([lambda x: x + 1], dtype=object)
+    var = [sgp.variableSelect(0)]
+    return [ops, var, []]
+
+
 def set_quality(model, x, y, metrics=None):
     if metrics is None:
         metrics = [sgp.fitness, sgp.stackGPModelComplexity]
@@ -622,6 +629,10 @@ class TestModelComparison(unittest.TestCase):
         m = simple_model()
         self.assertTrue(sgp.modelSameQ(m, copy.deepcopy(m)))
 
+    def test_modelSameQ_equivalent_fresh_lambdas(self):
+        self.assertTrue(sgp.modelSameQ(simple_model(), simple_model()))
+        self.assertTrue(sgp.modelSameQ(lambda_unary_model(), lambda_unary_model()))
+
     def test_modelSameQ_different_ops(self):
         m1 = simple_model()
         m2 = linear_model()
@@ -632,6 +643,11 @@ class TestModelComparison(unittest.TestCase):
         pop = [copy.deepcopy(m) for _ in range(5)]
         unique = sgp.deleteDuplicateModels(pop)
         self.assertEqual(len(unique), 1)
+
+    def test_deleteDuplicateModels_removes_fresh_lambda_duplicates(self):
+        pop = [simple_model(), simple_model(), lambda_unary_model(), lambda_unary_model()]
+        unique = sgp.deleteDuplicateModels(pop)
+        self.assertEqual(len(unique), 2)
 
     def test_deleteDuplicateModels_preserves_distinct(self):
         pop = [simple_model(), linear_model(), constant_model()]
