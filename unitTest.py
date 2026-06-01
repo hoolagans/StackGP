@@ -648,6 +648,8 @@ class TestModelComparison(unittest.TestCase):
         pop = [simple_model(), simple_model(), lambda_unary_model(), lambda_unary_model()]
         unique = sgp.deleteDuplicateModels(pop)
         self.assertEqual(len(unique), 2)
+        self.assertTrue(any(sgp.modelSameQ(model, simple_model()) for model in unique))
+        self.assertTrue(any(sgp.modelSameQ(model, lambda_unary_model()) for model in unique))
 
     def test_deleteDuplicateModels_preserves_distinct(self):
         pop = [simple_model(), linear_model(), constant_model()]

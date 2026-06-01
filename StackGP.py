@@ -657,11 +657,17 @@ def modelComponentKey(component):
             return ("float", "nan")
         if math.isinf(component):
             return ("float", "inf" if component > 0 else "-inf")
+        return ("float", component)
     if callable(component):
         code = getattr(component, "__code__", None)
         if code is None:
             return ("callable", component.__module__, component.__qualname__, component.__name__)
-        closure = tuple(modelComponentKey(cell.cell_contents) for cell in (component.__closure__ or ()))
+        closure = []
+        for cell in (component.__closure__ or ()):
+            try:
+                closure.append(modelComponentKey(cell.cell_contents))
+            except ValueError:
+                closure.append(("empty_cell",))
         defaults = tuple(modelComponentKey(value) for value in (component.__defaults__ or ()))
         kwdefaults = tuple((key, modelComponentKey(value)) for key, value in sorted((component.__kwdefaults__ or {}).items()))
         return (
@@ -671,7 +677,7 @@ def modelComponentKey(component):
             component.__name__,
             code.co_code,
             code.co_consts,
-            closure,
+            tuple(closure),
             defaults,
             kwdefaults,
         )
