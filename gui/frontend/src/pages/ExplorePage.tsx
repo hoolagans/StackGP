@@ -5,7 +5,7 @@ import {
   BarChart, Bar, Cell,
 } from 'recharts';
 import {
-  getStats, getCorrelation, getColumnData, getScatter, getSessionState,
+  getStats, getCorrelation, getColumnData, getScatter, getSessionState, getApiError,
 } from '../api/client';
 import { Card, Button, Spinner, EmptyState } from '../components/ui';
 import toast from 'react-hot-toast';
@@ -95,6 +95,7 @@ const ExplorePage: React.FC = () => {
   type ColData = Awaited<ReturnType<typeof getColumnData>>['data'];
 
   const [stats, setStats] = useState<StatsData | null>(null);
+  const [statsError, setStatsError] = useState<string | null>(null);
   const [corr, setCorr] = useState<{ columns: string[]; matrix: (number | null)[][] } | null>(null);
   const [selectedCol, setSelectedCol] = useState('');
   const [colData, setColData] = useState<ColData | null>(null);
@@ -103,7 +104,7 @@ const ExplorePage: React.FC = () => {
   const [scatterData, setScatterData] = useState<{ x: number[]; y: number[] } | null>(null);
 
   // Derive loading state: we are loading when data exists but stats haven't arrived yet.
-  const loading = hasData && stats === null;
+  const loading = hasData && stats === null && statsError === null;
 
   useEffect(() => {
     getSessionState().then(r => {
@@ -122,10 +123,12 @@ const ExplorePage: React.FC = () => {
       .then(([s, c]) => {
         setStats(s.data);
         setCorr(c.data);
+        setStatsError(null);
       })
-      .catch(() => {
-        toast.error('Failed to load stats');
-        setStats({});  // stop spinner on error
+      .catch((e) => {
+        const msg = getApiError(e, 'Failed to load stats');
+        toast.error(msg);
+        setStatsError(msg);
       });
   }, [hasData]);
 
@@ -154,6 +157,14 @@ const ExplorePage: React.FC = () => {
 
   if (loading) {
     return <div className="flex justify-center items-center h-64"><Spinner /></div>;
+  }
+
+  if (statsError) {
+    return (
+      <div className="p-6">
+        <EmptyState icon="⚠️" title="Could not load exploration data" subtitle={statsError} />
+      </div>
+    );
   }
 
   const histData = colData?.histogram

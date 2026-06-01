@@ -5,7 +5,7 @@ import {
 } from 'recharts';
 import {
   getSessionState, getModels, getEnsemble, predictModel, predictEnsemble,
-  findMaxUncertaintyPoint, ModelInfo,
+  findMaxUncertaintyPoint, ModelInfo, getApiError,
 } from '../api/client';
 import { Card, Button, Badge, Spinner, EmptyState, Input } from '../components/ui';
 import toast from 'react-hot-toast';
@@ -20,6 +20,7 @@ const PredictPage: React.FC = () => {
   const [inputs, setInputs] = useState<Record<string, string>>({});
   const [predictions, setPredictions] = useState<{ value: number | null; uncertainty?: number | null }[]>([]);
   const [batchText, setBatchText] = useState('');
+  const [batchRows, setBatchRows] = useState<number[][]>([]);
   const [batchResults, setBatchResults] = useState<{ pred: (number | null)[]; unc: (number | null)[] } | null>(null);
   const [predicting, setPredicting] = useState(false);
   const [maxUncPoint, setMaxUncPoint] = useState<number[] | null>(null);
@@ -59,8 +60,7 @@ const PredictPage: React.FC = () => {
         setPredictions([{ value: r.data.predictions[0] }]);
       }
     } catch (e) {
-      const detail = (e as { response?: { data?: { detail?: string } } }).response?.data?.detail;
-      toast.error(detail ?? 'Prediction failed');
+      toast.error(getApiError(e, 'Prediction failed'));
     } finally {
       setPredicting(false);
     }
@@ -76,6 +76,7 @@ const PredictPage: React.FC = () => {
     }
     setPredicting(true);
     try {
+      setBatchRows(rows);
       if (hasEnsemble) {
         const r = await predictEnsemble(rows);
         setBatchResults({ pred: r.data.predictions, unc: r.data.uncertainty });
@@ -85,8 +86,7 @@ const PredictPage: React.FC = () => {
       }
       toast.success(`Predicted ${rows.length} rows`);
     } catch (e) {
-      const detail = (e as { response?: { data?: { detail?: string } } }).response?.data?.detail;
-      toast.error(detail ?? 'Batch prediction failed');
+      toast.error(getApiError(e, 'Batch prediction failed'));
     } finally {
       setPredicting(false);
     }
@@ -102,16 +102,15 @@ const PredictPage: React.FC = () => {
       setInputs(newInputs);
       toast.success('Maximum uncertainty point found — inputs populated');
     } catch (e) {
-      const detail = (e as { response?: { data?: { detail?: string } } }).response?.data?.detail;
-      toast.error(detail ?? 'Failed');
+      toast.error(getApiError(e, 'Failed'));
     }
   };
 
   const downloadCSV = () => {
-    if (!batchResults) return;
+    if (!batchResults || batchRows.length === 0) return;
     const header = [...featureCols, 'prediction', 'uncertainty'].join(',');
-    const lines = batchText.trim().split('\n').filter(Boolean).map((l, i) =>
-      `${l},${batchResults.pred[i] ?? ''},${batchResults.unc[i] ?? ''}`
+    const lines = batchRows.map((row, i) =>
+      `${row.join(',')},${batchResults.pred[i] ?? ''},${batchResults.unc[i] ?? ''}`
     );
     const blob = new Blob([[header, ...lines].join('\n')], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);

@@ -45,7 +45,7 @@ export interface ModelInfo {
   fitness: number | null;
   complexity: number | null;
   metrics: (number | null)[];
-  predictions: (number | null)[];
+  predictions?: (number | null)[];
   residuals: number[];
 }
 
@@ -127,5 +127,10 @@ export const findMaxUncertaintyPoint = () => api.post<{ point: number[] }>('/pre
 // Session
 export const getSessionState = () => api.get<SessionState>('/session/state');
 export const resetSession = () => api.delete('/session/reset');
+
+export const getApiError = (e: unknown, fallback: string): string => {
+  const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+  return detail ?? fallback;
+};
 
 export default api;

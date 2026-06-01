@@ -15,7 +15,7 @@ const DataTable: React.FC<Props> = ({ data, maxRows = 100, onColumnClick, highli
   const pageSize = 20;
 
   const displayRows = React.useMemo(() => {
-    let rows = data.rows.slice(0, maxRows);
+    let rows = [...data.rows];
     if (sortCol !== null) {
       rows = [...rows].sort((a, b) => {
         const va = a[sortCol], vb = b[sortCol];
@@ -24,7 +24,7 @@ const DataTable: React.FC<Props> = ({ data, maxRows = 100, onColumnClick, highli
         return sortAsc ? (va > vb ? 1 : -1) : (va < vb ? 1 : -1);
       });
     }
-    return rows;
+    return rows.slice(0, maxRows);
   }, [data.rows, maxRows, sortCol, sortAsc]);
 
   const pageRows = displayRows.slice(page * pageSize, (page + 1) * pageSize);

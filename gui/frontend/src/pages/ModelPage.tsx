@@ -4,7 +4,7 @@ import { Play, Square, ChevronRight } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import {
   getSessionState, startTraining, stopTraining, getTrainStatus,
-  TrainConfig,
+  TrainConfig, getApiError,
 } from '../api/client';
 import { Card, Button, Select, Input, StatBadge, EmptyState } from '../components/ui';
 import toast from 'react-hot-toast';
@@ -37,9 +37,15 @@ const ModelPage: React.FC = () => {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
-    getSessionState().then(r => setHasData(r.data.has_processed_data)).catch(() => {});
+    getSessionState().then(r => {
+      setHasData(r.data.has_processed_data);
+      setStatus(r.data.training_status);
+      if (r.data.training_status === 'running' || r.data.training_status === 'starting') {
+        startPolling();
+      }
+    }).catch(() => {});
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, []);
+  }, [startPolling]);
 
   const startPolling = useCallback(() => {
     if (pollRef.current) clearInterval(pollRef.current);
@@ -74,16 +80,19 @@ const ModelPage: React.FC = () => {
       startPolling();
       toast('Training started…');
     } catch (e) {
-      const detail = (e as { response?: { data?: { detail?: string } } }).response?.data?.detail;
-      toast.error(detail ?? 'Failed to start');
+      toast.error(getApiError(e, 'Failed to start'));
     }
   };
 
   const handleStop = async () => {
-    await stopTraining();
-    if (pollRef.current) clearInterval(pollRef.current);
-    setStatus('idle');
-    toast('Training stopped');
+    try {
+      await stopTraining();
+      if (pollRef.current) clearInterval(pollRef.current);
+      setStatus('idle');
+      toast('Training stopped');
+    } catch (e) {
+      toast.error(getApiError(e, 'Failed to stop training'));
+    }
   };
 
   const isRunning = status === 'running' || status === 'starting';
