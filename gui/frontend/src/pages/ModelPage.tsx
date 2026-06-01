@@ -36,17 +36,6 @@ const ModelPage: React.FC = () => {
   const [log, setLog] = useState<{ gen?: number; fitness?: number; complexity?: number; error?: string }[]>([]);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  useEffect(() => {
-    getSessionState().then(r => {
-      setHasData(r.data.has_processed_data);
-      setStatus(r.data.training_status);
-      if (r.data.training_status === 'running' || r.data.training_status === 'starting') {
-        startPolling();
-      }
-    }).catch(() => {});
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, [startPolling]);
-
   const startPolling = useCallback(() => {
     if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(async () => {
@@ -65,6 +54,17 @@ const ModelPage: React.FC = () => {
       } catch (e) { console.error('Polling error', e); }
     }, 1000);
   }, []);
+
+  useEffect(() => {
+    getSessionState().then(r => {
+      setHasData(r.data.has_processed_data);
+      setStatus(r.data.training_status);
+      if (r.data.training_status === 'running' || r.data.training_status === 'starting') {
+        startPolling();
+      }
+    }).catch(() => {});
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, [startPolling]);
 
   const handleStart = async () => {
     const rateSum = cfg.mutation_rate + cfg.crossover_rate + cfg.spawn_rate;

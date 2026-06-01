@@ -15,7 +15,7 @@ const ImportPage: React.FC = () => {
   const [configured, setConfigured] = useState(false);
   const navigate = useNavigate();
 
-  const handleFile = async (file: File) => {
+  const handleFile = useCallback(async (file: File) => {
     if (!file) return;
     setLoading(true);
     try {
@@ -30,7 +30,7 @@ const ImportPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   const onDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
