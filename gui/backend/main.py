@@ -455,9 +455,8 @@ def _run_training(cfg: TrainConfig, stop_event: threading.Event):
 
     ops = _ops_set(cfg.ops_set)
 
-    log = []
     with session["training_lock"]:
-        session["training_log"] = log
+        session["training_log"] = []
         session["training_progress"] = 0
         session["training_total"] = cfg.generations
         session["training_status"] = "running"
@@ -499,7 +498,7 @@ def _run_training(cfg: TrainConfig, stop_event: threading.Event):
         except Exception as e:
             with session["training_lock"]:
                 session["training_status"] = "error"
-            log.append({"error": "Training failed — check server logs"})
+                session["training_log"].append({"error": "Training failed — check server logs"})
             return
 
         gens_done += chunk
@@ -514,6 +513,7 @@ def _run_training(cfg: TrainConfig, stop_event: threading.Event):
                 cplx = int(sgp.stackGPModelComplexity(current_models[0]))
             except Exception:
                 cplx = None
+        chunk_entries = []
         for j, fit in enumerate(best_fits):
             entry: Dict[str, Any] = {"gen": gens_done - chunk + j + 1}
             try:
@@ -522,7 +522,9 @@ def _run_training(cfg: TrainConfig, stop_event: threading.Event):
                 entry["fitness"] = None
             if cplx is not None and j == len(best_fits) - 1:
                 entry["complexity"] = cplx
-            log.append(entry)
+            chunk_entries.append(entry)
+        with session["training_lock"]:
+            session["training_log"].extend(chunk_entries)
 
     with session["training_lock"]:
         session["models"] = current_models
@@ -555,12 +557,18 @@ def start_training(cfg: TrainConfig):
 
 @app.get("/api/train/status")
 def get_training_status():
+    with session["training_lock"]:
+        status = session["training_status"]
+        progress = session["training_progress"]
+        total = session["training_total"]
+        log = session["training_log"][-50:]
+        model_count = len(session["models"])
     return {
-        "status": session["training_status"],
-        "progress": session["training_progress"],
-        "total": session["training_total"],
-        "log": session["training_log"][-50:],
-        "model_count": len(session["models"]),
+        "status": status,
+        "progress": progress,
+        "total": total,
+        "log": log,
+        "model_count": model_count,
     }
 
 
