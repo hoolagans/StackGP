@@ -39,7 +39,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
           <div className="text-white font-bold text-lg leading-tight">
             Stack<span className="text-brand-400">GP</span>
           </div>
-          <div className="text-gray-400 text-xs mt-0.5">Data Modeling Studio</div>
+          <div className="text-gray-400 text-xs mt-0.5">Modeling Studio</div>
         </div>
 
         {/* Nav */}

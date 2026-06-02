@@ -825,7 +825,7 @@ def optimizeModel(model, inputData, responseData, bounds=None, **kwargs):
     return newModel
 
 
-def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=defaultConst(), variableNames=[], mutationRate=79, crossoverRate=11, spawnRate=10, extinction=False,extinctionRate=10,elitismRate=10,popSize=300,maxComplexity=100,align=True,initialPop=[],timeLimit=300,capTime=False,tourneySize=5,tracking=False,returnTracking=False,liveTracking=False,liveTrackingInterval=1,modelEvaluationMetrics=[fitness,stackGPModelComplexity],dataSubsample=False,samplingMethod=randomSubsample,alternateObjectives=[],alternateObjFrequency=10,allowEarlyTermination=False,earlyTerminationThreshold=0):
+def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=defaultConst(), variableNames=[], mutationRate=79, crossoverRate=11, spawnRate=10, extinction=False,extinctionRate=10,elitismRate=10,popSize=300,maxComplexity=100,align=True,initialPop=[],timeLimit=300,capTime=False,tourneySize=5,tracking=False,returnTracking=False,liveTracking=False,liveTrackingInterval=1,modelEvaluationMetrics=[fitness,stackGPModelComplexity],dataSubsample=False,samplingMethod=randomSubsample,alternateObjectives=[],alternateObjFrequency=10,allowEarlyTermination=False,earlyTerminationThreshold=0,dedup=True):
     
     alternatingFlag = False
     if callable(modelEvaluationMetrics):
@@ -907,7 +907,8 @@ def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=def
         
         childModels=childModels+initializeGPModels(variableCount,ops,const,round(spawnRate/100*popSize))
         
-        childModels=deleteDuplicateModels(childModels)
+        if dedup:
+            childModels=deleteDuplicateModels(childModels)
         childModels=[model for model in childModels if stackGPModelComplexity(model)<maxComplexity]
         
         #for mods in childModels:
@@ -923,7 +924,8 @@ def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=def
     for mods in models:
         setModelQuality(mods,fullInput,fullResponse,modelEvaluationMetrics=allMetrics)
     models=[trimModel(mod) for mod in models]
-    models=deleteDuplicateModels(models)
+    if dedup:
+        models=deleteDuplicateModels(models)
     models=removeIndeterminateModels(models)
     models=sortModels(models)
     if align:

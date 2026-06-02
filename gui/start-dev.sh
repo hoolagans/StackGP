@@ -18,7 +18,7 @@ echo ""
 
 # Frontend dev server
 echo "Starting frontend (Vite)..."
-cd "$SCRIPT_DIR/../frontend"
+cd "$SCRIPT_DIR/frontend"
 npm run dev -- --port 5173 &
 FRONTEND_PID=$!
 echo "Frontend PID: $FRONTEND_PID"

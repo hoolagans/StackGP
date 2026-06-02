@@ -26,7 +26,6 @@ export interface TrainConfig {
   generations: number;
   pop_size: number;
   max_complexity: number;
-  max_length: number;
   mutation_rate: number;
   crossover_rate: number;
   spawn_rate: number;
@@ -45,7 +44,7 @@ export interface ModelInfo {
   fitness: number | null;
   complexity: number | null;
   metrics: (number | null)[];
-  predictions: (number | null)[];
+  predictions?: (number | null)[];
   residuals: number[];
 }
 
@@ -108,7 +107,7 @@ export const stopTraining = () => api.post('/train/stop');
 // Analysis
 export const getModels = (maxModels?: number) => api.get<{ models: ModelInfo[] }>(`/models?max_models=${maxModels ?? 50}`);
 export const getModel = (id: number) => api.get<ModelInfo>(`/models/${id}`);
-export const getPareto = () => api.get<{ pareto: ParetoPoint[] }>('/models/pareto');
+export const getPareto = () => api.get<{ onFront: ParetoPoint[]; offFront: ParetoPoint[] }>('/models/pareto');
 export const getResiduals = (id: number) => api.get<{
   actual: (number | null)[]; predicted: (number | null)[]; residuals: (number | null)[];
   train_rmse: number; test_rmse: number | null; train_fitness: number; test_fitness: number | null;
@@ -127,5 +126,10 @@ export const findMaxUncertaintyPoint = () => api.post<{ point: number[] }>('/pre
 // Session
 export const getSessionState = () => api.get<SessionState>('/session/state');
 export const resetSession = () => api.delete('/session/reset');
+
+export const getApiError = (e: unknown, fallback: string): string => {
+  const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+  return detail ?? fallback;
+};
 
 export default api;

@@ -4,7 +4,7 @@ import { Play, Square, ChevronRight } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import {
   getSessionState, startTraining, stopTraining, getTrainStatus,
-  TrainConfig,
+  TrainConfig, getApiError,
 } from '../api/client';
 import { Card, Button, Select, Input, StatBadge, EmptyState } from '../components/ui';
 import toast from 'react-hot-toast';
@@ -13,7 +13,6 @@ const DEFAULT_CFG: TrainConfig = {
   generations: 100,
   pop_size: 300,
   max_complexity: 100,
-  max_length: 10,
   mutation_rate: 79,
   crossover_rate: 11,
   spawn_rate: 10,
@@ -36,11 +35,6 @@ const ModelPage: React.FC = () => {
   const [log, setLog] = useState<{ gen?: number; fitness?: number; complexity?: number; error?: string }[]>([]);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  useEffect(() => {
-    getSessionState().then(r => setHasData(r.data.has_processed_data)).catch(() => {});
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, []);
-
   const startPolling = useCallback(() => {
     if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(async () => {
@@ -60,6 +54,17 @@ const ModelPage: React.FC = () => {
     }, 1000);
   }, []);
 
+  useEffect(() => {
+    getSessionState().then(r => {
+      setHasData(r.data.has_processed_data);
+      setStatus(r.data.training_status);
+      if (r.data.training_status === 'running' || r.data.training_status === 'starting') {
+        startPolling();
+      }
+    }).catch(() => {});
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, [startPolling]);
+
   const handleStart = async () => {
     const rateSum = cfg.mutation_rate + cfg.crossover_rate + cfg.spawn_rate;
     if (rateSum !== 100) {
@@ -74,16 +79,19 @@ const ModelPage: React.FC = () => {
       startPolling();
       toast('Training started…');
     } catch (e) {
-      const detail = (e as { response?: { data?: { detail?: string } } }).response?.data?.detail;
-      toast.error(detail ?? 'Failed to start');
+      toast.error(getApiError(e, 'Failed to start'));
     }
   };
 
   const handleStop = async () => {
-    await stopTraining();
-    if (pollRef.current) clearInterval(pollRef.current);
-    setStatus('idle');
-    toast('Training stopped');
+    try {
+      await stopTraining();
+      if (pollRef.current) clearInterval(pollRef.current);
+      setStatus('idle');
+      toast('Training stopped');
+    } catch (e) {
+      toast.error(getApiError(e, 'Failed to stop training'));
+    }
   };
 
   const isRunning = status === 'running' || status === 'starting';
@@ -98,7 +106,7 @@ const ModelPage: React.FC = () => {
   const updateCfg = <K extends keyof TrainConfig>(k: K, v: TrainConfig[K]) => setCfg(c => ({ ...c, [k]: v }));
 
   const INTEGER_KEYS: (keyof TrainConfig)[] = [
-    'generations', 'pop_size', 'max_complexity', 'max_length',
+    'generations', 'pop_size', 'max_complexity',
     'mutation_rate', 'crossover_rate', 'spawn_rate', 'time_limit',
   ];
 
@@ -151,7 +159,6 @@ const ModelPage: React.FC = () => {
               {numericInput('Generations', 'generations', 10, 5000)}
               {numericInput('Population size', 'pop_size', 10, 2000)}
               {numericInput('Max complexity', 'max_complexity', 5, 500)}
-              {numericInput('Max program length', 'max_length', 2, 50)}
               {numericInput('Time limit (s)', 'time_limit', 10, 3600)}
               <Select
                 label="Operator set"
@@ -276,7 +283,7 @@ const ModelPage: React.FC = () => {
               {log.length === 0 ? (
                 <div className="text-gray-500">Waiting for training to start…</div>
               ) : (
-                [...log].reverse().slice(0, 50).map((entry, i) =>
+                [...log].reverse().map((entry, i) =>
                   entry.error ? (
                     <div key={i} className="text-red-400">ERROR: {entry.error}</div>
                   ) : (
@@ -298,12 +305,10 @@ const ModelPage: React.FC = () => {
             <LineChart data={chartData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
               <XAxis dataKey="gen" tick={{ fontSize: 10 }} label={{ value: 'Generation', position: 'insideBottom', offset: -3, fontSize: 11 }} />
-              <YAxis yAxisId="fit" domain={[0, 1]} tick={{ fontSize: 10 }} label={{ value: 'Fitness', angle: -90, position: 'insideLeft', fontSize: 11 }} />
-              <YAxis yAxisId="cplx" orientation="right" tick={{ fontSize: 10 }} label={{ value: 'Complexity', angle: 90, position: 'insideRight', fontSize: 11 }} />
+              <YAxis domain={[0, 1]} tick={{ fontSize: 10 }} label={{ value: 'Fitness (1−R²)', angle: -90, position: 'insideLeft', fontSize: 11 }} />
               <Tooltip />
               <Legend wrapperStyle={{ fontSize: 11 }} />
-              <Line yAxisId="fit" type="monotone" dataKey="fitness" stroke="#3b82f6" dot={false} name="Fitness (1−R²)" strokeWidth={2} />
-              <Line yAxisId="cplx" type="monotone" dataKey="complexity" stroke="#f59e0b" dot={false} name="Complexity" strokeWidth={1.5} strokeDasharray="4 4" />
+              <Line type="monotone" dataKey="fitness" stroke="#3b82f6" dot={false} strokeWidth={2} />
             </LineChart>
           </ResponsiveContainer>
         </Card>

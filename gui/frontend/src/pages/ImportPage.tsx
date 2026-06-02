@@ -1,7 +1,7 @@
 import React, { useCallback, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Upload, ChevronRight, Check } from 'lucide-react';
-import { uploadFile, configureColumns, DataTable as DT } from '../api/client';
+import { uploadFile, configureColumns, DataTable as DT, getApiError } from '../api/client';
 import { Card, Button, Badge, EmptyState } from '../components/ui';
 import DataTable from '../components/DataTable';
 import toast from 'react-hot-toast';
@@ -15,30 +15,41 @@ const ImportPage: React.FC = () => {
   const [configured, setConfigured] = useState(false);
   const navigate = useNavigate();
 
-  const handleFile = async (file: File) => {
+  const handleFile = useCallback(async (file: File) => {
     if (!file) return;
     setLoading(true);
     try {
       const res = await uploadFile(file);
+      const cols = res.data.columns;
+      const lastCol = cols[cols.length - 1] ?? '';
+      const dtypes = res.data.dtypes;
+      const autoFeatures = cols.filter(c => {
+        if (c === lastCol) return false;
+        const dt = dtypes[c] ?? '';
+        return dt.startsWith('float') || dt.startsWith('int') || dt === 'number';
+      });
       setData(res.data);
-      setConfigured(false);
-      setFeatureCols([]);
-      setTargetCol('');
+      setTargetCol(lastCol);
+      if (autoFeatures.length > 0) {
+        setFeatureCols(autoFeatures);
+        setConfigured(true);
+      } else {
+        setFeatureCols([]);
+      }
       toast.success(`Loaded ${res.data.total_rows} rows × ${res.data.columns.length} columns`);
     } catch (e) {
-      const detail = (e as { response?: { data?: { detail?: string } } }).response?.data?.detail;
-      toast.error(detail ?? 'Upload failed');
+      toast.error(getApiError(e, 'Upload failed'));
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   const onDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setDragging(false);
     const file = e.dataTransfer.files[0];
     if (file) handleFile(file);
-  }, []);
+  }, [handleFile]);
 
   const onFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -64,8 +75,8 @@ const ImportPage: React.FC = () => {
   };
 
   const handleConfigure = async () => {
-    if (!targetCol || featureCols.length === 0) {
-      toast.error('Select a target column and at least one feature');
+    if (featureCols.length === 0) {
+      toast.error('Select at least one feature column');
       return;
     }
     try {
@@ -73,8 +84,7 @@ const ImportPage: React.FC = () => {
       setConfigured(true);
       toast.success('Columns configured');
     } catch (e) {
-      const detail = (e as { response?: { data?: { detail?: string } } }).response?.data?.detail;
-      toast.error(detail ?? 'Failed');
+      toast.error(getApiError(e, 'Failed'));
     }
   };
 
@@ -177,7 +187,7 @@ const ImportPage: React.FC = () => {
             </div>
 
             <div className="mt-5 flex items-center gap-3">
-              <Button onClick={handleConfigure} disabled={!targetCol || featureCols.length === 0}>
+              <Button onClick={handleConfigure} disabled={featureCols.length === 0}>
                 <Check size={14} /> Apply Configuration
               </Button>
               {configured && (

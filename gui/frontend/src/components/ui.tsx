@@ -34,11 +34,16 @@ const statColorMap: Record<string, { wrap: string; text: string }> = {
 
 export const StatBadge: React.FC<StatProps> = ({ label, value, sub, color = 'brand' }) => {
   const c = statColorMap[color] ?? statColorMap.brand;
+  const formatted = value == null
+    ? '—'
+    : typeof value === 'number'
+      ? (Number.isInteger(value) ? value.toLocaleString() : value.toFixed(4))
+      : value;
   return (
     <div className={`rounded-lg border px-4 py-3 ${c.wrap}`}>
       <div className="text-xs text-gray-500 font-medium mb-0.5">{label}</div>
       <div className={`text-xl font-bold ${c.text}`}>
-        {value == null ? '—' : typeof value === 'number' ? value.toPrecision(4) : value}
+        {formatted}
       </div>
       {sub && <div className="text-xs text-gray-400 mt-0.5">{sub}</div>}
     </div>

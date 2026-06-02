@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronRight } from 'lucide-react';
-import { processData, getSessionState, ProcessConfig, DataTable as DataTableType } from '../api/client';
+import { processData, getSessionState, ProcessConfig, DataTable as DataTableType, getApiError } from '../api/client';
 import { Card, Button, Select, Input, StatBadge, EmptyState } from '../components/ui';
 import DataTable from '../components/DataTable';
 import toast from 'react-hot-toast';
@@ -37,8 +37,7 @@ const ProcessPage: React.FC = () => {
       setResult(res.data);
       toast.success(`Processed: ${res.data.train_rows} train / ${res.data.test_rows} test`);
     } catch (e) {
-      const detail = (e as { response?: { data?: { detail?: string } } }).response?.data?.detail;
-      toast.error(detail ?? 'Processing failed');
+      toast.error(getApiError(e, 'Processing failed'));
     } finally {
       setLoading(false);
     }
@@ -116,7 +115,10 @@ const ProcessPage: React.FC = () => {
               label="Random seed"
               type="number"
               value={cfg.random_seed}
-              onChange={e => setCfg(c => ({ ...c, random_seed: parseInt(e.target.value) || 42 }))}
+              onChange={e => {
+                const parsed = parseInt(e.target.value, 10);
+                setCfg(c => ({ ...c, random_seed: Number.isNaN(parsed) ? 42 : parsed }));
+              }}
             />
           </div>
         </Card>

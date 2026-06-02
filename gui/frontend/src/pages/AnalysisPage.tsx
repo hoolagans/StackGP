@@ -7,8 +7,13 @@ import {
 } from 'recharts';
 import {
   getModels, getPareto, getResiduals, getVariableImportance, buildEnsemble,
-  getSessionState, ModelInfo, ParetoPoint,
+  getSessionState, ModelInfo, ParetoPoint, getApiError,
 } from '../api/client';
+
+interface ParetoResult {
+  onFront: ParetoPoint[];
+  offFront: ParetoPoint[];
+}
 import { Card, Button, StatBadge, Badge, Spinner, EmptyState } from '../components/ui';
 import toast from 'react-hot-toast';
 
@@ -16,7 +21,7 @@ const AnalysisPage: React.FC = () => {
   const navigate = useNavigate();
   const [fetched, setFetched] = useState(false);
   const [models, setModels] = useState<ModelInfo[]>([]);
-  const [pareto, setPareto] = useState<ParetoPoint[]>([]);
+  const [pareto, setPareto] = useState<ParetoResult>({ onFront: [], offFront: [] });
   const [importance, setImportance] = useState<Record<string, number>>({});
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [residuals, setResiduals] = useState<{
@@ -48,7 +53,7 @@ const AnalysisPage: React.FC = () => {
     Promise.all([getModels(100), getPareto(), getVariableImportance()])
       .then(([m, p, vi]) => {
         setModels(m.data.models);
-        setPareto(p.data.pareto);
+        setPareto(p.data);
         setImportance(vi.data.importance);
         if (m.data.models.length > 0) setSelectedId(m.data.models[0].id);
       })
@@ -68,8 +73,7 @@ const AnalysisPage: React.FC = () => {
       setEnsembleBuilt(true);
       toast.success(`Ensemble built with ${r.data.ensemble_size} models`);
     } catch (e) {
-      const detail = (e as { response?: { data?: { detail?: string } } }).response?.data?.detail;
-      toast.error(detail ?? 'Failed');
+      toast.error(getApiError(e, 'Failed'));
     } finally {
       setBuildingEnsemble(false);
     }
@@ -92,13 +96,6 @@ const AnalysisPage: React.FC = () => {
 
   const selectedModel = models.find(m => m.id === selectedId);
 
-  // Pareto chart data
-  const paretoChart = pareto.map(p => ({
-    complexity: p.complexity,
-    fitness: p.fitness != null ? parseFloat(p.fitness.toFixed(4)) : null,
-    id: p.id,
-  }));
-
   // Residual chart
   const residualChart = residuals
     ? residuals.actual.slice(0, 500).map((a, i) => ({
@@ -107,6 +104,39 @@ const AnalysisPage: React.FC = () => {
         residual: residuals.residuals[i],
       })).filter(d => d.actual != null && d.predicted != null)
     : [];
+
+  // Shared axis domain so the y=x diagonal appears correctly.
+  // Compute from both actual and predicted values, with a tiny padding.
+  const predAxisDomain: [number, number] = residualChart.length > 0
+    ? (() => {
+        const allVals = residualChart
+          .map(d => [d.actual as number, d.predicted as number])
+          .flat()
+          .filter(v => v != null);
+        if (allVals.length === 0) return [0, 1] as [number, number];
+        const lo = Math.min(...allVals);
+        const hi = Math.max(...allVals);
+        const pad = (hi - lo) * 0.05 || 0.01;
+        return [lo - pad, hi + pad] as [number, number];
+      })()
+    : [0, 1] as [number, number];
+
+  // Numeric domain for Pareto chart X-axis (complexity).
+  // Recharts v3 does not support mixing numbers with 'auto' in domain[],
+  // so we compute bounds from the actual data.
+  const paretoAll = [...(pareto.onFront ?? []), ...(pareto.offFront ?? [])];
+  const paretoXDomain: [number, number] = paretoAll.length > 0
+    ? (() => {
+        const vals = paretoAll
+          .map(d => d.complexity)
+          .filter((c): c is number => c != null);
+        if (vals.length === 0) return [0, 1];
+        const lo = Math.min(...vals);
+        const hi = Math.max(...vals);
+        const pad = Math.max((hi - lo) * 0.05, 1);
+        return [Math.max(lo - pad, 0), hi + pad];
+      })()
+    : [0, 1];
 
   // Variable importance chart
   const impChart = Object.entries(importance)
@@ -134,14 +164,15 @@ const AnalysisPage: React.FC = () => {
         <ResponsiveContainer width="100%" height={260}>
           <ScatterChart>
             <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-            <XAxis dataKey="complexity" name="Complexity" tick={{ fontSize: 10 }}
+            <XAxis dataKey="complexity" name="Complexity" type="number" numTicks={8} tick={{ fontSize: 10 }}
+              domain={paretoXDomain}
               label={{ value: 'Complexity', position: 'insideBottom', offset: -3, fontSize: 11 }} />
-            <YAxis dataKey="fitness" name="Fitness" domain={[0, 1]} tick={{ fontSize: 10 }}
+            <YAxis dataKey="fitness" name="Fitness" type="number" domain={[0, 1]} tick={{ fontSize: 10 }}
               label={{ value: 'Fitness (1−R²)', angle: -90, position: 'insideLeft', fontSize: 11 }} />
             <Tooltip content={({ active, payload }) => {
               if (!active || !payload?.length) return null;
               const d = payload[0].payload;
-              const m = pareto.find(p => p.id === d.id);
+              const m = pareto.onFront.find(p => p.id === d.id) ?? pareto.offFront.find(p => p.id === d.id);
               return (
                 <div className="bg-white border border-gray-200 rounded-lg shadow p-3 text-xs max-w-xs">
                   <div className="font-semibold mb-1">Model #{d.id}</div>
@@ -151,16 +182,30 @@ const AnalysisPage: React.FC = () => {
                 </div>
               );
             }} />
+            {/* Non-Pareto-front models (muted background) — reversed so lower-indexed on top */}
             <Scatter
-              data={paretoChart.map(d => ({ ...d, selected: d.id === selectedId }))}
-              fill="#3b82f6"
-              opacity={0.7}
-              onClick={(d) => setSelectedId((d as unknown as { id: number }).id)}
-              cursor="pointer"
+              name="Dominated"
+              data={[...pareto.offFront].reverse().map(d => ({ ...d, isFront: false }))}
+              fill="#94a3b8"
+              opacity={0.25}
+              r={3}
             />
+            {/* Pareto-front models (highlighted) — reversed so lower-indexed on top */}
+            {pareto.onFront.length > 0 && (
+              <Scatter
+                name="Pareto-front"
+                data={[...pareto.onFront].reverse().map(d => ({ ...d, isFront: true }))}
+                fill="#ef4444"
+                opacity={0.85}
+                r={5}
+              />
+            )}
           </ScatterChart>
         </ResponsiveContainer>
-        <p className="text-xs text-gray-400 mt-1">Click a point to inspect that model below.</p>
+        <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
+          <span className="flex items-center gap-1"><span className="inline-block w-2.5 h-2.5 rounded-full bg-red-500" /> Pareto-front models</span>
+          <span className="flex items-center gap-1"><span className="inline-block w-2.5 h-2.5 rounded-full bg-slate-400" /> Dominated models</span>
+        </div>
       </Card>
 
       {/* Model table */}
@@ -235,12 +280,20 @@ const AnalysisPage: React.FC = () => {
               <ResponsiveContainer width="100%" height={240}>
                 <ScatterChart>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                  <XAxis dataKey="actual" name="Actual" tick={{ fontSize: 10 }}
+                  <XAxis dataKey="actual" name="Actual" type="number" numTicks={8} tick={{ fontSize: 10 }}
+                    domain={predAxisDomain}
+                    tickFormatter={v => Number(v).toPrecision(4)}
                     label={{ value: 'Actual', position: 'insideBottom', offset: -3, fontSize: 11 }} />
-                  <YAxis dataKey="predicted" name="Predicted" tick={{ fontSize: 10 }}
+                  <YAxis dataKey="predicted" name="Predicted" type="number" numTicks={8} tick={{ fontSize: 10 }}
+                    domain={predAxisDomain}
+                    tickFormatter={v => Number(v).toPrecision(4)}
                     label={{ value: 'Predicted', angle: -90, position: 'insideLeft', fontSize: 11 }} />
+                  <ReferenceLine segment={[
+                    { x: predAxisDomain[0], y: predAxisDomain[0] },
+                    { x: predAxisDomain[1], y: predAxisDomain[1] },
+                  ]} stroke="#94a3b8" strokeDasharray="6 4" opacity={0.5} />
                   <Tooltip />
-                  <Scatter data={residualChart} fill="#3b82f6" opacity={0.5} r={3} />
+                  <Scatter data={residualChart} fill="#3b82f6" opacity={0.6} r={3} />
                 </ScatterChart>
               </ResponsiveContainer>
             ) : <div className="text-sm text-gray-400 italic py-8 text-center">Loading…</div>}
@@ -252,9 +305,12 @@ const AnalysisPage: React.FC = () => {
               <ResponsiveContainer width="100%" height={200}>
                 <ScatterChart>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                  <XAxis dataKey="actual" name="Actual" tick={{ fontSize: 10 }}
+                  <XAxis dataKey="actual" name="Actual" type="number" numTicks={8} tick={{ fontSize: 10 }}
+                    domain={predAxisDomain}
+                    tickFormatter={v => Number(v).toPrecision(4)}
                     label={{ value: 'Actual', position: 'insideBottom', offset: -3, fontSize: 11 }} />
-                  <YAxis dataKey="residual" name="Residual" tick={{ fontSize: 10 }}
+                  <YAxis dataKey="residual" name="Residual" type="number" numTicks={8} tick={{ fontSize: 10 }}
+                    tickFormatter={v => Number(v).toPrecision(4)}
                     label={{ value: 'Residual', angle: -90, position: 'insideLeft', fontSize: 11 }} />
                   <ReferenceLine y={0} stroke="#ef4444" strokeDasharray="4 4" />
                   <Tooltip />

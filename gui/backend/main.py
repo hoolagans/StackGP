@@ -16,10 +16,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 import numpy as np
 import pandas as pd
-from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks
+from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 import io
 
 import StackGP as sgp
@@ -29,7 +29,7 @@ app = FastAPI(title="StackGP GUI API", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -80,8 +80,8 @@ def get_xy(df: pd.DataFrame, target: str, features: List[str]):
 def model_to_dict(model, idx: int, inputData, response, varNames) -> dict:
     try:
         pred = sgp.evaluateGPModel(model, inputData)
-        rmse_val = float(sgp.rmse(model, inputData, response))
-        fit_val = float(sgp.fitness(model, inputData, response))
+        rmse_val = _sanitise_float(sgp.rmse(model, inputData, response))
+        fit_val = _sanitise_float(sgp.fitness(model, inputData, response))
         complexity = int(sgp.stackGPModelComplexity(model))
         expr = sgp.printGPModel(model, varNames)
         residuals = (np.array(pred) - np.array(response)).tolist()
@@ -94,23 +94,45 @@ def model_to_dict(model, idx: int, inputData, response, varNames) -> dict:
         pred = []
 
     metrics = model[2] if len(model) > 2 else []
-    safe_metrics = []
-    for m in metrics:
-        try:
-            safe_metrics.append(float(m))
-        except Exception:
-            safe_metrics.append(None)
+    safe_metrics = [_sanitise_float(m) for m in metrics]
 
-    return {
+    model_dict = {
         "id": idx,
         "expression": str(expr),
         "rmse": rmse_val,
         "fitness": fit_val,
         "complexity": complexity,
         "metrics": safe_metrics,
-        "predictions": [float(v) if np.isfinite(float(v)) else None for v in (pred if hasattr(pred, '__len__') else [])],
-        "residuals": residuals,
+        "residuals": [float(v) if np.isfinite(float(v)) else None for v in residuals],
     }
+    if hasattr(pred, '__len__'):
+        safe_pred = []
+        for v in pred:
+            try:
+                fv = float(v)
+            except Exception:
+                safe_pred.append(None)
+                continue
+            safe_pred.append(fv if np.isfinite(fv) else None)
+        model_dict["predictions"] = safe_pred
+    else:
+        model_dict["predictions"] = []
+    return model_dict
+
+
+def _sanitise_float(v) -> Optional[float]:
+    """Convert a float-like value to JSON-safe float (NaN → None)."""
+    if v is None:
+        return None
+    f = float(v)
+    return None if not np.isfinite(f) else f
+
+
+def active_df() -> Optional[pd.DataFrame]:
+    df = session["processed_df"]
+    if df is not None:
+        return df
+    return session["raw_df"]
 
 
 # ---------------------------------------------------------------------------
@@ -118,14 +140,14 @@ def model_to_dict(model, idx: int, inputData, response, varNames) -> dict:
 # ---------------------------------------------------------------------------
 
 class ColumnConfig(BaseModel):
-    target_col: str
+    target_col: str = ''
     feature_cols: List[str]
 
 
 class ProcessConfig(BaseModel):
-    fill_missing: str = "drop"  # drop | mean | median | zero
-    normalize: str = "none"    # none | minmax | zscore
-    train_split: float = 0.8
+    fill_missing: Literal["drop", "mean", "median", "zero"] = "drop"
+    normalize: Literal["none", "minmax", "zscore"] = "none"
+    train_split: float = Field(default=0.8, gt=0.0, lt=1.0)
     random_seed: int = 42
 
 
@@ -133,7 +155,6 @@ class TrainConfig(BaseModel):
     generations: int = 100
     pop_size: int = 300
     max_complexity: int = 100
-    max_length: int = 10
     mutation_rate: int = 79
     crossover_rate: int = 11
     spawn_rate: int = 10
@@ -143,6 +164,14 @@ class TrainConfig(BaseModel):
     data_subsample: bool = False
     allow_early_termination: bool = False
     early_termination_threshold: float = 0.0
+
+    @model_validator(mode="after")
+    def validate_rates(self):
+        if self.mutation_rate < 0 or self.crossover_rate < 0 or self.spawn_rate < 0:
+            raise ValueError("Mutation/crossover/spawn rates must be non-negative")
+        if self.mutation_rate + self.crossover_rate + self.spawn_rate != 100:
+            raise ValueError("Mutation/crossover/spawn rates must sum to 100")
+        return self
 
 
 class PredictRequest(BaseModel):
@@ -199,11 +228,23 @@ def configure_columns(cfg: ColumnConfig):
     df = session["raw_df"]
     if df is None:
         raise HTTPException(404, "No data loaded")
-    if cfg.target_col not in df.columns:
-        raise HTTPException(400, f"Column '{cfg.target_col}' not found")
     bad = [c for c in cfg.feature_cols if c not in df.columns]
     if bad:
         raise HTTPException(400, f"Columns not found: {bad}")
+
+    # Deduplicate features (remove target if it crept in)
+    features = [c for c in cfg.feature_cols if c != cfg.target_col]
+
+    # Auto-default target to last column if not explicitly set
+    if not cfg.target_col:
+        cfg.target_col = df.columns[-1]
+    if cfg.target_col not in df.columns:
+        raise HTTPException(400, f"Column '{cfg.target_col}' not found")
+
+    if cfg.target_col in cfg.feature_cols:
+        raise HTTPException(400, "Target column cannot also be a feature column")
+    if not features:
+        raise HTTPException(400, "At least one feature column is required")
     session["target_col"] = cfg.target_col
     session["feature_cols"] = cfg.feature_cols
     return {"ok": True, "target_col": cfg.target_col, "feature_cols": cfg.feature_cols}
@@ -221,7 +262,18 @@ def process_data(cfg: ProcessConfig):
     target = session["target_col"]
     features = session["feature_cols"]
     if not target or not features:
-        raise HTTPException(400, "Configure target and feature columns first")
+        # Auto-default: last column as target, all other numeric columns as features
+        if not target:
+            target = df.columns[-1]
+            session["target_col"] = target
+        numeric_features = [c for c in df.columns if c != target and pd.api.types.is_numeric_dtype(df[c])]
+        if not features:
+            features = numeric_features
+            session["feature_cols"] = features
+        if not target or not features:
+            raise HTTPException(400, "Need at least one numeric feature column for auto-default")
+    if session["training_status"] in {"starting", "running"}:
+        raise HTTPException(400, "Stop training before re-processing data")
 
     cols = features + [target]
     df2 = df[cols].copy()
@@ -255,10 +307,18 @@ def process_data(cfg: ProcessConfig):
     split = int(n * cfg.train_split)
     train_idx = idx[:split].tolist()
     test_idx = idx[split:].tolist()
+    if not train_idx or not test_idx:
+        raise HTTPException(400, "Train/test split produced an empty set. Adjust split or dataset size.")
 
     session["processed_df"] = df2
     session["train_indices"] = train_idx
     session["test_indices"] = test_idx
+    session["models"] = []
+    session["ensemble"] = []
+    session["training_log"] = []
+    session["training_status"] = "idle"
+    session["training_progress"] = 0
+    session["training_total"] = 0
 
     return {
         "ok": True,
@@ -283,7 +343,7 @@ def get_processed_data():
 
 @app.get("/api/explore/stats")
 def get_stats():
-    df = session["processed_df"] or session["raw_df"]
+    df = active_df()
     if df is None:
         raise HTTPException(404, "No data loaded")
     numeric_df = df.select_dtypes(include=[np.number])
@@ -291,25 +351,25 @@ def get_stats():
     result = {}
     for col in desc.index:
         result[col] = {
-            "count": float(desc.loc[col, "count"]),
-            "mean": float(desc.loc[col, "mean"]),
-            "std": float(desc.loc[col, "std"]),
-            "min": float(desc.loc[col, "min"]),
-            "q25": float(desc.loc[col, "25%"]),
-            "median": float(desc.loc[col, "50%"]),
-            "q75": float(desc.loc[col, "75%"]),
-            "max": float(desc.loc[col, "max"]),
+            "count": _sanitise_float(desc.loc[col, "count"]),
+            "mean": _sanitise_float(desc.loc[col, "mean"]),
+            "std": _sanitise_float(desc.loc[col, "std"]),
+            "min": _sanitise_float(desc.loc[col, "min"]),
+            "q25": _sanitise_float(desc.loc[col, "25%"]),
+            "median": _sanitise_float(desc.loc[col, "50%"]),
+            "q75": _sanitise_float(desc.loc[col, "75%"]),
+            "max": _sanitise_float(desc.loc[col, "max"]),
             "missing": int(df[col].isna().sum()),
             "unique": int(df[col].nunique()),
-            "skewness": float(df[col].dropna().skew()),
-            "kurtosis": float(df[col].dropna().kurtosis()),
+            "skewness": _sanitise_float(df[col].dropna().skew()),
+            "kurtosis": _sanitise_float(df[col].dropna().kurtosis()),
         }
     return result
 
 
 @app.get("/api/explore/correlation")
 def get_correlation():
-    df = session["processed_df"] or session["raw_df"]
+    df = active_df()
     if df is None:
         raise HTTPException(404, "No data loaded")
     numeric_df = df.select_dtypes(include=[np.number])
@@ -322,7 +382,7 @@ def get_correlation():
 
 @app.get("/api/explore/column/{col}")
 def get_column_data(col: str):
-    df = session["processed_df"] or session["raw_df"]
+    df = active_df()
     if df is None:
         raise HTTPException(404, "No data loaded")
     if col not in df.columns:
@@ -346,9 +406,14 @@ def _compute_histogram(series: pd.Series, bins: int = 30) -> dict:
 
 @app.get("/api/explore/scatter")
 def get_scatter(x_col: str, y_col: str, max_points: int = 1000):
-    df = session["processed_df"] or session["raw_df"]
+    df = active_df()
     if df is None:
         raise HTTPException(404, "No data loaded")
+    missing = [c for c in (x_col, y_col) if c not in df.columns]
+    if missing:
+        raise HTTPException(400, f"Columns not found: {missing}")
+    if max_points <= 0:
+        raise HTTPException(400, "max_points must be > 0")
     sub = df[[x_col, y_col]].dropna()
     if len(sub) > max_points:
         sub = sub.sample(max_points, random_state=42)
@@ -360,7 +425,7 @@ def get_scatter(x_col: str, y_col: str, max_points: int = 1000):
 
 @app.get("/api/explore/pairplot")
 def get_pairplot(max_points: int = 300):
-    df = session["processed_df"] or session["raw_df"]
+    df = active_df()
     if df is None:
         raise HTTPException(404, "No data loaded")
     cols = session["feature_cols"] or list(df.select_dtypes(include=[np.number]).columns)[:8]
@@ -392,14 +457,26 @@ _TRAINING_CHUNK = 10  # generations per progress/stop-check interval
 
 
 def _run_training(cfg: TrainConfig, stop_event: threading.Event):
-    df = session["processed_df"]
-    target = session["target_col"]
-    features = session["feature_cols"]
-    train_idx = session["train_indices"]
+    with session["training_lock"]:
+        df = session["processed_df"]
+        target = session["target_col"]
+        features = list(session["feature_cols"])
+        train_idx = list(session["train_indices"])
 
     if df is None or not target or not features:
-        session["training_status"] = "error"
-        return
+        # Auto-default: last column as target, all other numeric as features
+        if df is not None and not target:
+            target = df.columns[-1]
+            with session["training_lock"]:
+                session["target_col"] = target
+        if not features and df is not None:
+            features = [c for c in df.columns if c != target and pd.api.types.is_numeric_dtype(df[c])]
+            with session["training_lock"]:
+                session["feature_cols"] = features
+        if not target or not features:
+            with session["training_lock"]:
+                session["training_status"] = "error"
+            return
 
     train_df = df.iloc[train_idx] if train_idx else df
     x, y = get_xy(train_df, target, features)
@@ -407,11 +484,11 @@ def _run_training(cfg: TrainConfig, stop_event: threading.Event):
 
     ops = _ops_set(cfg.ops_set)
 
-    log = []
-    session["training_log"] = log
-    session["training_progress"] = 0
-    session["training_total"] = cfg.generations
-    session["training_status"] = "running"
+    with session["training_lock"]:
+        session["training_log"] = []
+        session["training_progress"] = 0
+        session["training_total"] = cfg.generations
+        session["training_status"] = "running"
 
     current_models: list = []
     gens_done = 0
@@ -448,77 +525,91 @@ def _run_training(cfg: TrainConfig, stop_event: threading.Event):
             )
             current_models, best_fits = result
         except Exception as e:
-            session["training_status"] = "error"
-            log.append({"error": "Training failed — check server logs"})
+            with session["training_lock"]:
+                session["training_status"] = "error"
+                session["training_log"].append({"error": "Training failed — check server logs"})
             return
 
         gens_done += chunk
         with session["training_lock"]:
             session["training_progress"] = gens_done
 
-        # Populate per-generation log entries from tracking data
+        # Populate per-generation log entries from tracking data.
+        # Complexity is only known for the current best model at chunk end.
         cplx = None
         if current_models:
             try:
                 cplx = int(sgp.stackGPModelComplexity(current_models[0]))
             except Exception:
-                pass
+                cplx = None
+        chunk_entries = []
         for j, fit in enumerate(best_fits):
             entry: Dict[str, Any] = {"gen": gens_done - chunk + j + 1}
-            try:
-                entry["fitness"] = float(fit)
-            except Exception:
-                entry["fitness"] = None
-            if cplx is not None:
+            entry["fitness"] = _sanitise_float(float(fit))
+            if cplx is not None and j == len(best_fits) - 1:
                 entry["complexity"] = cplx
-            log.append(entry)
-
-    session["models"] = current_models
-    if stop_event.is_set():
-        session["training_status"] = "idle"
-    else:
-        session["training_status"] = "done"
+            chunk_entries.append(entry)
         with session["training_lock"]:
+            session["training_log"].extend(chunk_entries)
+
+    with session["training_lock"]:
+        session["models"] = current_models
+        if stop_event.is_set():
+            session["training_status"] = "idle"
+        else:
+            session["training_status"] = "done"
             session["training_progress"] = cfg.generations
 
 
 @app.post("/api/train/start")
-def start_training(cfg: TrainConfig, background_tasks: BackgroundTasks):
+def start_training(cfg: TrainConfig):
     with session["training_lock"]:
-        if session["training_status"] == "running":
+        old_thread = session.get("training_thread")
+        if session["training_status"] in {"starting", "running"} or (old_thread is not None and old_thread.is_alive()):
             raise HTTPException(400, "Training already running")
         session["models"] = []
         session["ensemble"] = []
         session["training_log"] = []
         session["training_status"] = "starting"
         session["training_progress"] = 0
-
-    stop_event = threading.Event()
-    session["stop_event"] = stop_event
-    t = threading.Thread(target=_run_training, args=(cfg, stop_event), daemon=True)
-    session["training_thread"] = t
+        session["training_total"] = cfg.generations
+        stop_event = threading.Event()
+        t = threading.Thread(target=_run_training, args=(cfg, stop_event), daemon=True)
+        session["stop_event"] = stop_event
+        session["training_thread"] = t
     t.start()
     return {"ok": True, "status": "started"}
 
 
 @app.get("/api/train/status")
 def get_training_status():
+    with session["training_lock"]:
+        status = session["training_status"]
+        progress = session["training_progress"]
+        total = session["training_total"]
+        log = session["training_log"]
+        model_count = len(session["models"])
     return {
-        "status": session["training_status"],
-        "progress": session["training_progress"],
-        "total": session["training_total"],
-        "log": session["training_log"][-50:],
-        "model_count": len(session["models"]),
+        "status": status,
+        "progress": progress,
+        "total": total,
+        "log": log,
+        "model_count": model_count,
     }
 
 
 @app.post("/api/train/stop")
 def stop_training():
     stop_event: Optional[threading.Event] = session.get("stop_event")
+    thread: Optional[threading.Thread] = session.get("training_thread")
     if stop_event is not None:
         stop_event.set()
-    session["training_status"] = "idle"
-    return {"ok": True}
+    if thread is not None and thread.is_alive():
+        thread.join(timeout=2.0)
+    with session["training_lock"]:
+        status = "running" if thread is not None and thread.is_alive() else "idle"
+        session["training_status"] = status
+    return {"ok": True, "status": status}
 
 
 # ---------------------------------------------------------------------------
@@ -542,7 +633,12 @@ def list_models(max_models: int = 50):
 
     result = []
     for i, m in enumerate(models[:max_models]):
-        result.append(model_to_dict(m, i, x, y, var_syms))
+        item = model_to_dict(m, i, x, y, var_syms)
+        item.pop("predictions", None)
+        result.append(item)
+
+    # Sort by fitness ascending (best first); NaN fitness → treat as 1.0 (worst)
+    result.sort(key=lambda m: m["fitness"] if m["fitness"] is not None else 1.0)
     return {"models": result}
 
 
@@ -555,20 +651,42 @@ def get_pareto():
     df = session["processed_df"]
     target = session["target_col"]
     features = session["feature_cols"]
+    if df is None or not target or not features:
+        return {"pareto": []}
     var_syms = [sgp.symbols(n) for n in features]
     x, y = get_xy(df, target, features)
 
-    result = []
+    result_on_front = []
+    result_off_front = []
     for i, m in enumerate(models):
         try:
-            fit = float(m[2][0]) if m[2] else None
-            cplx = int(m[2][1]) if len(m[2]) > 1 else None
+            raw_fit = float(sgp.fitness(m, x, y))
+            # NaN fitness means perfect (or near-perfect) fit numerically —
+            # e.g. 1.0 - 1.0 = NaN from floating-point. Treat it as 0.0 so
+            # the model survives the Pareto computation.
+            fit = 0.0 if (raw_fit != raw_fit) else raw_fit  # NaN check via x != x
+            cplx = int(sgp.stackGPModelComplexity(m))
             expr = str(sgp.printGPModel(m, var_syms))
-            result.append({"id": i, "fitness": fit, "complexity": cplx, "expression": expr})
+            item = {"id": i, "fitness": fit, "complexity": cplx, "expression": expr}
+            # Check dominance against every other model
+            dominated = False
+            for j, n in enumerate(models):
+                if j == i:
+                    continue
+                raw_f2 = float(sgp.fitness(n, x, y))
+                f2 = 0.0 if (raw_f2 != raw_f2) else raw_f2
+                c2 = int(sgp.stackGPModelComplexity(n))
+                if f2 <= fit and c2 <= cplx and (f2 < fit or c2 < cplx):
+                    dominated = True
+                    break
+            if dominated:
+                result_off_front.append(item)
+            else:
+                result_on_front.append(item)
         except Exception:
             pass
 
-    return {"pareto": result}
+    return {"onFront": result_on_front, "offFront": result_off_front}
 
 
 @app.get("/api/models/variable_importance")
@@ -579,16 +697,12 @@ def get_variable_importance(max_models: int = 20):
         return {"importance": {}}
 
     var_usage: Dict[str, int] = {f: 0 for f in features}
+    var_syms = [sgp.symbols(n) for n in features]
     for m in models[:max_models]:
         try:
-            # m[1] is the var stack: a list of variableSelect(i) lambdas and float constants.
-            # variableSelect(i) creates `lambda variables: variables[i]`, so the captured
-            # index is in __closure__[0].cell_contents.
-            for v in m[1]:
-                if callable(v) and getattr(v, '__closure__', None):
-                    idx = v.__closure__[0].cell_contents
-                    if isinstance(idx, int) and 0 <= idx < len(features):
-                        var_usage[features[idx]] += 1
+            expr = str(sgp.printGPModel(m, var_syms))
+            for f in features:
+                var_usage[f] += expr.count(f)
         except Exception:
             pass
 
@@ -599,7 +713,7 @@ def get_variable_importance(max_models: int = 20):
 @app.get("/api/models/{model_id}")
 def get_model(model_id: int):
     models = session["models"]
-    if model_id >= len(models):
+    if model_id < 0 or model_id >= len(models):
         raise HTTPException(404, "Model not found")
 
     df = session["processed_df"]
@@ -614,7 +728,7 @@ def get_model(model_id: int):
 @app.get("/api/models/{model_id}/residuals")
 def get_residuals(model_id: int):
     models = session["models"]
-    if model_id >= len(models):
+    if model_id < 0 or model_id >= len(models):
         raise HTTPException(404, "Model not found")
 
     df = session["processed_df"]
@@ -639,10 +753,10 @@ def get_residuals(model_id: int):
         "actual": safe_list(y),
         "predicted": safe_list(pred),
         "residuals": safe_list(resid),
-        "train_rmse": float(sgp.rmse(model, x[:, train_idx] if train_idx else x, y[train_idx] if train_idx else y)),
-        "test_rmse": float(sgp.rmse(model, x[:, test_idx] if test_idx else x, y[test_idx] if test_idx else y)) if test_idx else None,
-        "train_fitness": float(sgp.fitness(model, x[:, train_idx] if train_idx else x, y[train_idx] if train_idx else y)),
-        "test_fitness": float(sgp.fitness(model, x[:, test_idx] if test_idx else x, y[test_idx] if test_idx else y)) if test_idx else None,
+        "train_rmse": _sanitise_float(sgp.rmse(model, x[:, train_idx] if train_idx else x, y[train_idx] if train_idx else y)),
+        "test_rmse": _sanitise_float(sgp.rmse(model, x[:, test_idx] if test_idx else x, y[test_idx] if test_idx else y)) if test_idx else None,
+        "train_fitness": _sanitise_float(sgp.fitness(model, x[:, train_idx] if train_idx else x, y[train_idx] if train_idx else y)),
+        "test_fitness": _sanitise_float(sgp.fitness(model, x[:, test_idx] if test_idx else x, y[test_idx] if test_idx else y)) if test_idx else None,
     }
 
 
@@ -696,8 +810,13 @@ def get_ensemble_info():
 @app.post("/api/predict/model/{model_id}")
 def predict_model(model_id: int, req: PredictRequest):
     models = session["models"]
-    if model_id >= len(models):
+    if model_id < 0 or model_id >= len(models):
         raise HTTPException(404, "Model not found")
+    features = session["feature_cols"]
+    if not features:
+        raise HTTPException(400, "No feature configuration found")
+    if any(len(row) != len(features) for row in req.rows):
+        raise HTTPException(400, f"Each row must have exactly {len(features)} values")
 
     x_new = np.array(req.rows).T.astype(float)
     model = models[model_id]
@@ -705,7 +824,11 @@ def predict_model(model_id: int, req: PredictRequest):
         pred = sgp.evaluateGPModel(model, x_new)
         if not hasattr(pred, '__len__'):
             pred = [float(pred)] * len(req.rows)
-        return {"predictions": [float(v) if np.isfinite(float(v)) else None for v in pred]}
+        safe_pred = []
+        for v in pred:
+            fv = float(v)
+            safe_pred.append(fv if np.isfinite(fv) else None)
+        return {"predictions": safe_pred}
     except Exception:
         raise HTTPException(500, "Prediction failed")
 
@@ -716,6 +839,12 @@ def predict_ensemble(req: PredictRequest):
     if not ensemble:
         raise HTTPException(400, "No ensemble built yet")
 
+    features = session["feature_cols"]
+    if not features:
+        raise HTTPException(400, "No feature configuration found")
+    if any(len(row) != len(features) for row in req.rows):
+        raise HTTPException(400, f"Each row must have exactly {len(features)} values")
+
     x_new = np.array(req.rows).T.astype(float)
     try:
         pred = sgp.evaluateModelEnsemble(ensemble, x_new)
@@ -723,10 +852,14 @@ def predict_ensemble(req: PredictRequest):
         if not hasattr(pred, '__len__'):
             pred = [float(pred)] * len(req.rows)
             unc = [float(unc)] * len(req.rows)
-        return {
-            "predictions": [float(v) if np.isfinite(float(v)) else None for v in pred],
-            "uncertainty": [float(v) if np.isfinite(float(v)) else None for v in unc],
-        }
+        safe_pred = []
+        safe_unc = []
+        for pv, uv in zip(pred, unc):
+            fp = float(pv)
+            fu = float(uv)
+            safe_pred.append(fp if np.isfinite(fp) else None)
+            safe_unc.append(fu if np.isfinite(fu) else None)
+        return {"predictions": safe_pred, "uncertainty": safe_unc}
     except Exception:
         raise HTTPException(500, "Ensemble prediction failed")
 
@@ -768,6 +901,12 @@ def get_session_state():
 
 @app.delete("/api/session/reset")
 def reset_session():
+    stop_event: Optional[threading.Event] = session.get("stop_event")
+    thread: Optional[threading.Thread] = session.get("training_thread")
+    if stop_event is not None:
+        stop_event.set()
+    if thread is not None and thread.is_alive():
+        thread.join(timeout=2.0)
     for k in ["raw_df", "processed_df", "target_col", "feature_cols",
               "train_indices", "test_indices", "models", "ensemble",
               "training_log"]:
@@ -775,6 +914,8 @@ def reset_session():
     session["training_status"] = "idle"
     session["training_progress"] = 0
     session["training_total"] = 0
+    session["training_thread"] = None
+    session["stop_event"] = None
     return {"ok": True}
 
 

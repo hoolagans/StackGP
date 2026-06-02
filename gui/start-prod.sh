@@ -9,7 +9,7 @@ echo "=== StackGP GUI — Production Build ==="
 
 # Build frontend
 echo "Building frontend..."
-cd "$SCRIPT_DIR/../frontend"
+cd "$SCRIPT_DIR/frontend"
 npm run build
 
 echo ""
