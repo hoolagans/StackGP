@@ -4,7 +4,7 @@ import { Play, Square, ChevronRight } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import {
   getSessionState, startTraining, stopTraining, getTrainStatus,
-  TrainConfig, getApiError,
+  TrainConfig,
 } from '../api/client';
 import { Card, Button, Select, Input, StatBadge, EmptyState } from '../components/ui';
 import toast from 'react-hot-toast';
@@ -36,6 +36,11 @@ const ModelPage: React.FC = () => {
   const [log, setLog] = useState<{ gen?: number; fitness?: number; complexity?: number; error?: string }[]>([]);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  useEffect(() => {
+    getSessionState().then(r => setHasData(r.data.has_processed_data)).catch(() => {});
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, []);
+
   const startPolling = useCallback(() => {
     if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(async () => {
@@ -55,17 +60,6 @@ const ModelPage: React.FC = () => {
     }, 1000);
   }, []);
 
-  useEffect(() => {
-    getSessionState().then(r => {
-      setHasData(r.data.has_processed_data);
-      setStatus(r.data.training_status);
-      if (r.data.training_status === 'running' || r.data.training_status === 'starting') {
-        startPolling();
-      }
-    }).catch(() => {});
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, [startPolling]);
-
   const handleStart = async () => {
     const rateSum = cfg.mutation_rate + cfg.crossover_rate + cfg.spawn_rate;
     if (rateSum !== 100) {
@@ -80,19 +74,16 @@ const ModelPage: React.FC = () => {
       startPolling();
       toast('Training started…');
     } catch (e) {
-      toast.error(getApiError(e, 'Failed to start'));
+      const detail = (e as { response?: { data?: { detail?: string } } }).response?.data?.detail;
+      toast.error(detail ?? 'Failed to start');
     }
   };
 
   const handleStop = async () => {
-    try {
-      await stopTraining();
-      if (pollRef.current) clearInterval(pollRef.current);
-      setStatus('idle');
-      toast('Training stopped');
-    } catch (e) {
-      toast.error(getApiError(e, 'Failed to stop training'));
-    }
+    await stopTraining();
+    if (pollRef.current) clearInterval(pollRef.current);
+    setStatus('idle');
+    toast('Training stopped');
   };
 
   const isRunning = status === 'running' || status === 'starting';

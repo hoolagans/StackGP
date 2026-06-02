@@ -645,18 +645,59 @@ def tournamentModelSelection(models, popSize=100,tourneySize=5):
     
     return selectedModels
 paretoTournament.__doc__ = "paretoTournament(models, inputData, responseData) returns the Pareto front of a model set"
+def modelComponentKey(component):
+    if isinstance(component, np.ndarray):
+        return tuple(modelComponentKey(item) for item in component.tolist())
+    if isinstance(component, (list, tuple)):
+        return tuple(modelComponentKey(item) for item in component)
+    if isinstance(component, np.generic):
+        return modelComponentKey(component.item())
+    if isinstance(component, float):
+        if math.isnan(component):
+            return ("float", "nan")
+        if math.isinf(component):
+            return ("float", "inf" if component > 0 else "-inf")
+        return ("float", component)
+    if callable(component):
+        code = getattr(component, "__code__", None)
+        if code is None:
+            return ("callable", component.__module__, component.__qualname__, component.__name__)
+        closure = []
+        for cell in (component.__closure__ or ()):
+            try:
+                closure.append(modelComponentKey(cell.cell_contents))
+            except ValueError:
+                closure.append(("empty_cell",))
+        defaults = tuple(modelComponentKey(value) for value in (component.__defaults__ or ()))
+        kwdefaults = tuple((key, modelComponentKey(value)) for key, value in sorted((component.__kwdefaults__ or {}).items()))
+        return (
+            "callable",
+            component.__module__,
+            component.__qualname__,
+            component.__name__,
+            code.co_code,
+            code.co_consts,
+            tuple(closure),
+            defaults,
+            kwdefaults,
+        )
+    return component
+modelComponentKey.__doc__ = "modelComponentKey(component) returns a stable comparison key for model components"
+def modelStructureKey(model):
+    return (modelComponentKey(model[0]), modelComponentKey(model[1]))
+modelStructureKey.__doc__ = "modelStructureKey(model) returns a stable key for the operator and data stacks of a model"
 def modelSameQ(model1,model2): #Checks if two models are the same
-    return len(model1[0])==len(model2[0]) and len(model1[1]) == len(model2[1]) and all(model1[0]==model2[0]) and model1[1]==model2[1]
+    return modelStructureKey(model1)==modelStructureKey(model2)
 modelSameQ.__doc__ = "modelSameQ(model1,model2) checks if model1 and model2 are the same and returns True if so, else False"
 def deleteDuplicateModels(models): #Removes any models that are the same, does not consider simplified form
-    uniqueMods = [models[0]]
-     
+    if len(models)==0:
+        return []
+    uniqueMods = []
+    seenModels = set()
     for mod in models:
-        test=False
-        for checkMod in uniqueMods:
-            if modelSameQ(mod,checkMod):
-                test=True
-        if not test:
+        key=modelStructureKey(mod)
+        if key not in seenModels:
+            seenModels.add(key)
             uniqueMods.append(mod)
     
     return uniqueMods

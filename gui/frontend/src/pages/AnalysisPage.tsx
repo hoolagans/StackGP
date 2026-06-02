@@ -7,7 +7,7 @@ import {
 } from 'recharts';
 import {
   getModels, getPareto, getResiduals, getVariableImportance, buildEnsemble,
-  getSessionState, ModelInfo, ParetoPoint, getApiError,
+  getSessionState, ModelInfo, ParetoPoint,
 } from '../api/client';
 import { Card, Button, StatBadge, Badge, Spinner, EmptyState } from '../components/ui';
 import toast from 'react-hot-toast';
@@ -68,7 +68,8 @@ const AnalysisPage: React.FC = () => {
       setEnsembleBuilt(true);
       toast.success(`Ensemble built with ${r.data.ensemble_size} models`);
     } catch (e) {
-      toast.error(getApiError(e, 'Failed'));
+      const detail = (e as { response?: { data?: { detail?: string } } }).response?.data?.detail;
+      toast.error(detail ?? 'Failed');
     } finally {
       setBuildingEnsemble(false);
     }
@@ -154,11 +155,7 @@ const AnalysisPage: React.FC = () => {
               data={paretoChart.map(d => ({ ...d, selected: d.id === selectedId }))}
               fill="#3b82f6"
               opacity={0.7}
-              onClick={(d: unknown) => {
-                if (typeof d === 'object' && d !== null && 'id' in d && typeof (d as { id: unknown }).id === 'number') {
-                  setSelectedId((d as { id: number }).id);
-                }
-              }}
+              onClick={(d) => setSelectedId((d as unknown as { id: number }).id)}
               cursor="pointer"
             />
           </ScatterChart>

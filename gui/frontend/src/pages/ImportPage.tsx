@@ -1,7 +1,7 @@
 import React, { useCallback, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Upload, ChevronRight, Check } from 'lucide-react';
-import { uploadFile, configureColumns, DataTable as DT, getApiError } from '../api/client';
+import { uploadFile, configureColumns, DataTable as DT } from '../api/client';
 import { Card, Button, Badge, EmptyState } from '../components/ui';
 import DataTable from '../components/DataTable';
 import toast from 'react-hot-toast';
@@ -15,7 +15,7 @@ const ImportPage: React.FC = () => {
   const [configured, setConfigured] = useState(false);
   const navigate = useNavigate();
 
-  const handleFile = useCallback(async (file: File) => {
+  const handleFile = async (file: File) => {
     if (!file) return;
     setLoading(true);
     try {
@@ -26,18 +26,19 @@ const ImportPage: React.FC = () => {
       setTargetCol('');
       toast.success(`Loaded ${res.data.total_rows} rows × ${res.data.columns.length} columns`);
     } catch (e) {
-      toast.error(getApiError(e, 'Upload failed'));
+      const detail = (e as { response?: { data?: { detail?: string } } }).response?.data?.detail;
+      toast.error(detail ?? 'Upload failed');
     } finally {
       setLoading(false);
     }
-  }, []);
+  };
 
   const onDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setDragging(false);
     const file = e.dataTransfer.files[0];
     if (file) handleFile(file);
-  }, [handleFile]);
+  }, []);
 
   const onFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -72,7 +73,8 @@ const ImportPage: React.FC = () => {
       setConfigured(true);
       toast.success('Columns configured');
     } catch (e) {
-      toast.error(getApiError(e, 'Failed'));
+      const detail = (e as { response?: { data?: { detail?: string } } }).response?.data?.detail;
+      toast.error(detail ?? 'Failed');
     }
   };
 
