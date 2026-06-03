@@ -59,6 +59,13 @@ def power(a,b):
     if (type(a)==np.ndarray) and (0 in a):
         return a/np.where(a==0,math.nan,a)
     return a**b
+def cf(a,b):
+    if (type(a)==int or type(a)==float or type(a)==np.float64) and (type(b)==int or type(b)==float or type(b)==np.float64):
+        if(a==b):
+            return math.nan
+    if ((type(a)==np.ndarray) or (type(b)==np.ndarray)) and (a==b).all():
+        return np.where(a==b,math.nan,1/(a-b))
+    return 1/(a-b)
 def sqrt(a):
     return np.sqrt(a)
 def sqrd(a):
