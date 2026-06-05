@@ -791,10 +791,10 @@ def alignGPModel(model, data, response): #Aligns a model
     if np.isnan(np.array(prediction)).any() or np.isnan(np.array(response)).any() or not np.isfinite(np.array(prediction,dtype=np.float32)).all():
         return model
     # Variance guards
-    if np.std(prediction) < 1e-12:
-        return model
-    if np.ptp(prediction) < 1e-12:
-        return model
+    # if np.std(prediction) < 1e-12:
+    #     return model
+    # if np.ptp(prediction) < 1e-12:
+    #     return model
     try:
         align=np.polyfit(prediction,response,1,rcond=1e-16)#np.round(np.polyfit(prediction,response,1,rcond=1e-16),decimals=14)
     except np.linalg.LinAlgError:
