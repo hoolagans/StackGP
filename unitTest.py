@@ -776,6 +776,22 @@ class TestSympyExprToGPModel(unittest.TestCase):
         converted = sgp.printGPModel(model)
         self.assertEqual(sym.simplify(converted - expr), 0)
 
+    def test_sympyExprToGPModel_square_uses_sqrd(self):
+        import sympy as sym
+        x0 = sym.symbols("x0")
+        model = sgp.sympyExprToGPModel(x0**2)
+        self.assertTrue(any(op is sgp.sqrd for op in model[0]))
+        converted = sgp.printGPModel(model)
+        self.assertEqual(sym.simplify(converted - (x0**2)), 0)
+
+    def test_sympyExprToGPModel_inverse_uses_inv(self):
+        import sympy as sym
+        x0 = sym.symbols("x0")
+        model = sgp.sympyExprToGPModel(x0**-1)
+        self.assertTrue(any(op is sgp.inv for op in model[0]))
+        converted = sgp.printGPModel(model)
+        self.assertEqual(sym.simplify(converted - (x0**-1)), 0)
+
     def test_sympyExprToGPModel_constant(self):
         import sympy as sym
         expr = sym.Integer(5)
