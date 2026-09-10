@@ -956,6 +956,99 @@ def evolve(inputData, responseData, generations=100, ops=defaultOps(), const=def
 
 def replaceFunc(stack,f1,f2):
     return [i if i!=f1 else f2 for i in stack]
+def sympyExprToGPModel(expr, variableOrder=None):
+    """Convert a SymPy expression into StackGP model form [ops, vars, quality]."""
+    try:
+        expression = sym.sympify(expr)
+    except Exception as exc:
+        raise ValueError("expr must be convertible to a SymPy expression") from exc
+
+    if variableOrder is None:
+        ordered_symbols = sorted(list(expression.free_symbols), key=lambda s: str(s))
+    else:
+        ordered_symbols = [sym.Symbol(str(v)) for v in variableOrder]
+        missing = [s for s in expression.free_symbols if s not in ordered_symbols]
+        if missing:
+            raise ValueError(f"variableOrder is missing symbols: {missing}")
+
+    symbol_to_index = {symbol: i for i, symbol in enumerate(ordered_symbols)}
+    unary_map = {
+        sym.exp: exp,
+        sym.sqrt: sqrt,
+        sym.log: log,
+        sym.sin: sin,
+        sym.cos: cos,
+        sym.tan: tan,
+        sym.asin: arcsin,
+        sym.acos: arccos,
+        sym.atan: arctan,
+        sym.tanh: tanh,
+    }
+
+    op_stack = []
+    var_stack = []
+
+    def _push_leaf(node):
+        op_stack.append("pop")
+        if isinstance(node, sym.Symbol):
+            var_stack.append(variableSelect(symbol_to_index[node]))
+            return
+        if node.is_number:
+            var_stack.append(float(sym.N(node)))
+            return
+        raise ValueError(f"Unsupported leaf node in expression: {node}")
+
+    def _emit(node):
+        if isinstance(node, sym.Symbol) or node.is_number:
+            _push_leaf(node)
+            return
+
+        if node.func is sym.Add:
+            args = list(node.args)
+            _emit(args[0])
+            _emit(args[1])
+            op_stack.append(add)
+            for arg in args[2:]:
+                _emit(arg)
+                op_stack.append(add)
+            return
+
+        if node.func is sym.Mul:
+            args = list(node.args)
+            _emit(args[0])
+            _emit(args[1])
+            op_stack.append(mult)
+            for arg in args[2:]:
+                _emit(arg)
+                op_stack.append(mult)
+            return
+
+        if node.func is sym.Pow:
+            base, exponent = node.args
+            if exponent == 2:
+                _emit(base)
+                op_stack.append(sqrd)
+                return
+            if exponent == -1:
+                _emit(base)
+                op_stack.append(inv)
+                return
+            _emit(base)
+            _emit(exponent)
+            op_stack.append(power)
+            return
+
+        mapped_unary = unary_map.get(node.func)
+        if mapped_unary and len(node.args) == 1:
+            _emit(node.args[0])
+            op_stack.append(mapped_unary)
+            return
+
+        raise ValueError(f"Unsupported SymPy operation: {node.func}")
+
+    _emit(expression)
+    return [np.array(op_stack, dtype=object), var_stack, []]
+
 def printGPModel(mod,inputData=symbols(["x"+str(i) for i in range(100)])): #Evaluates a model algebraically
     def inv1(a):
         return a**(-1)

@@ -750,6 +750,45 @@ class TestPrintGPModel(unittest.TestCase):
         result = sgp.printGPModel(bad_model)
         self.assertTrue(result != result or result is None or isinstance(result, float))
 
+class TestSympyExprToGPModel(unittest.TestCase):
+
+    def test_sympyExprToGPModel_add(self):
+        import sympy as sym
+        x0, x1 = sym.symbols("x0 x1")
+        expr = x0 + x1
+        model = sgp.sympyExprToGPModel(expr)
+        converted = sgp.printGPModel(model)
+        self.assertEqual(sym.simplify(converted - expr), 0)
+
+    def test_sympyExprToGPModel_unary_and_power(self):
+        import sympy as sym
+        x0, x1 = sym.symbols("x0 x1")
+        expr = sym.sin(x0) + sym.sqrt(x1) + x0**2
+        model = sgp.sympyExprToGPModel(expr)
+        converted = sgp.printGPModel(model)
+        self.assertEqual(sym.simplify(converted - expr), 0)
+
+    def test_sympyExprToGPModel_constant(self):
+        import sympy as sym
+        expr = sym.Integer(5)
+        model = sgp.sympyExprToGPModel(expr)
+        converted = sgp.printGPModel(model)
+        self.assertEqual(sym.simplify(converted - expr), 0)
+
+    def test_sympyExprToGPModel_variable_order(self):
+        import sympy as sym
+        a, b = sym.symbols("a b")
+        expr = a - b
+        model = sgp.sympyExprToGPModel(expr, variableOrder=[b, a])
+        result = sgp.evaluateGPModel(model, np.array([[2.0, 4.0], [7.0, 9.0]]))
+        np.testing.assert_allclose(result, np.array([5.0, 5.0]))
+
+    def test_sympyExprToGPModel_unsupported_raises(self):
+        import sympy as sym
+        x0 = sym.symbols("x0")
+        with self.assertRaises(ValueError):
+            sgp.sympyExprToGPModel(sym.gamma(x0))
+
 
 # ---------------------------------------------------------------------------
 # 13. Stack Helpers
