@@ -966,7 +966,7 @@ def sympyExprToGPModel(expr, variableOrder=None):
     if variableOrder is None:
         ordered_symbols = sorted(list(expression.free_symbols), key=lambda s: str(s))
     else:
-        ordered_symbols = [sym.Symbol(str(v)) for v in variableOrder]
+        ordered_symbols = [v if isinstance(v, sym.Symbol) else sym.Symbol(str(v)) for v in variableOrder]
         missing = [s for s in expression.free_symbols if s not in ordered_symbols]
         if missing:
             raise ValueError(f"variableOrder is missing symbols: {missing}")
@@ -998,29 +998,25 @@ def sympyExprToGPModel(expr, variableOrder=None):
             return
         raise ValueError(f"Unsupported leaf node in expression: {node}")
 
+    def _emit_associative(args, stackgp_op):
+        _emit(args[0])
+        _emit(args[1])
+        op_stack.append(stackgp_op)
+        for arg in args[2:]:
+            _emit(arg)
+            op_stack.append(stackgp_op)
+
     def _emit(node):
         if isinstance(node, sym.Symbol) or node.is_number:
             _push_leaf(node)
             return
 
         if node.func is sym.Add:
-            args = list(node.args)
-            _emit(args[0])
-            _emit(args[1])
-            op_stack.append(add)
-            for arg in args[2:]:
-                _emit(arg)
-                op_stack.append(add)
+            _emit_associative(list(node.args), add)
             return
 
         if node.func is sym.Mul:
-            args = list(node.args)
-            _emit(args[0])
-            _emit(args[1])
-            op_stack.append(mult)
-            for arg in args[2:]:
-                _emit(arg)
-                op_stack.append(mult)
+            _emit_associative(list(node.args), mult)
             return
 
         if node.func is sym.Pow:

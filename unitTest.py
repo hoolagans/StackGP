@@ -792,6 +792,13 @@ class TestSympyExprToGPModel(unittest.TestCase):
         result = sgp.evaluateGPModel(model, np.array([[2.0, 4.0], [7.0, 9.0]]))
         np.testing.assert_allclose(result, np.array([5.0, 5.0]))
 
+    def test_sympyExprToGPModel_missing_variable_order_raises(self):
+        import sympy as sym
+        a, b = sym.symbols("a b")
+        expr = a + b
+        with self.assertRaises(ValueError):
+            sgp.sympyExprToGPModel(expr, variableOrder=[a])
+
     def test_sympyExprToGPModel_unsupported_raises(self):
         import sympy as sym
         x0 = sym.symbols("x0")
