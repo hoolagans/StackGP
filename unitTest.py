@@ -765,9 +765,17 @@ class TestSympyExprToGPModel(unittest.TestCase):
         x0, x1 = sym.symbols("x0 x1")
         expr = sym.sin(x0) + sym.sqrt(x1) + x0**2
         model = sgp.sympyExprToGPModel(expr)
-        self.assertTrue(any(op is sgp.sqrt for op in model[0]))
         converted = sgp.printGPModel(model)
         self.assertEqual(sym.simplify(converted - expr), 0)
+
+    def test_sympyExprToGPModel_nonnegative_half_power_uses_sqrt(self):
+        import sympy as sym
+        x0 = sym.symbols("x0", nonnegative=True)
+        expr = x0**sym.Rational(1, 2)
+        model = sgp.sympyExprToGPModel(expr)
+        self.assertTrue(any(op is sgp.sqrt for op in model[0]))
+        result = sgp.evaluateGPModel(model, np.array([[4.0, 9.0]]))
+        np.testing.assert_allclose(result, np.array([2.0, 3.0]))
 
     def test_sympyExprToGPModel_general_power(self):
         import sympy as sym
