@@ -768,6 +768,14 @@ class TestSympyExprToGPModel(unittest.TestCase):
         converted = sgp.printGPModel(model)
         self.assertEqual(sym.simplify(converted - expr), 0)
 
+    def test_sympyExprToGPModel_general_power(self):
+        import sympy as sym
+        x0 = sym.symbols("x0")
+        expr = x0**3
+        model = sgp.sympyExprToGPModel(expr)
+        converted = sgp.printGPModel(model)
+        self.assertEqual(sym.simplify(converted - expr), 0)
+
     def test_sympyExprToGPModel_constant(self):
         import sympy as sym
         expr = sym.Integer(5)
