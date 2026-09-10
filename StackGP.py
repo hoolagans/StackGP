@@ -1029,6 +1029,10 @@ def sympyExprToGPModel(expr, variableOrder=None):
                 _emit(base)
                 op_stack.append(sqrd)
                 return
+            if exponent == sym.Rational(1, 2):
+                _emit(base)
+                op_stack.append(sqrt)
+                return
             if exponent == -1:
                 _emit(base)
                 op_stack.append(inv)

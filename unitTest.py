@@ -765,6 +765,7 @@ class TestSympyExprToGPModel(unittest.TestCase):
         x0, x1 = sym.symbols("x0 x1")
         expr = sym.sin(x0) + sym.sqrt(x1) + x0**2
         model = sgp.sympyExprToGPModel(expr)
+        self.assertTrue(any(op is sgp.sqrt for op in model[0]))
         converted = sgp.printGPModel(model)
         self.assertEqual(sym.simplify(converted - expr), 0)
 
