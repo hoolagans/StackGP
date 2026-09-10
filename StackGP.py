@@ -966,7 +966,11 @@ def sympyExprToGPModel(expr, variableOrder=None):
     if variableOrder is None:
         ordered_symbols = sorted(list(expression.free_symbols), key=lambda s: str(s))
     else:
-        ordered_symbols = [v if isinstance(v, sym.Symbol) else sym.Symbol(str(v)) for v in variableOrder]
+        ordered_symbols = []
+        for v in variableOrder:
+            if not isinstance(v, sym.Symbol):
+                raise ValueError("variableOrder entries must be SymPy symbols")
+            ordered_symbols.append(v)
         missing = [s for s in expression.free_symbols if s not in ordered_symbols]
         if missing:
             raise ValueError(f"variableOrder is missing symbols: {missing}")
@@ -1024,13 +1028,6 @@ def sympyExprToGPModel(expr, variableOrder=None):
             if exponent == 2:
                 _emit(base)
                 op_stack.append(sqrd)
-                return
-            if (
-                exponent == sym.Rational(1, 2)
-                and (base.is_nonnegative is True or (base.is_number and float(base) >= 0))
-            ):
-                _emit(base)
-                op_stack.append(sqrt)
                 return
             if exponent == -1:
                 _emit(base)
